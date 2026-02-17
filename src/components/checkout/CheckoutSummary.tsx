@@ -127,7 +127,7 @@ export function CheckoutSummary({
                   {item.quantity} x {formatPrice(
                     (isWholesale && item.product.wholesalePrice
                       ? item.product.wholesalePrice
-                      : item.product.price) * 1000,
+                      : item.product.price),
                     language
                   )}
                 </p>
@@ -139,9 +139,9 @@ export function CheckoutSummary({
                 isWholesale && item.product.wholesalePrice ? 'text-green-600' : 'text-slate-900'
               )}>
                 {formatPrice(
-                  ((isWholesale && item.product.wholesalePrice
+                  (isWholesale && item.product.wholesalePrice
                     ? item.product.wholesalePrice
-                    : item.product.price) * item.quantity) * 1000,
+                    : item.product.price) * item.quantity,
                   language
                 )}
               </p>
@@ -177,7 +177,7 @@ export function CheckoutSummary({
         <div className="flex justify-between text-sm">
           <span className="text-slate-600">{t.subtotal[language]}</span>
           <span className="text-slate-900 font-medium">
-            {formatPrice(totals.subtotal * 1000, language)}
+            {formatPrice(totals.subtotal, language)}
           </span>
         </div>
 
@@ -188,7 +188,7 @@ export function CheckoutSummary({
             <span className="text-green-600 font-medium">{t.shippingFree[language]}</span>
           ) : (
             <span className="text-slate-900 font-medium">
-              {formatPrice(totals.shippingFee * 1000, language)}
+              {formatPrice(totals.shippingFee, language)}
             </span>
           )}
         </div>
@@ -198,7 +198,7 @@ export function CheckoutSummary({
           <div className="flex justify-between text-sm">
             <span className="text-slate-600">{t.codFee[language]}</span>
             <span className="text-amber-600 font-medium">
-              +{formatPrice(totals.codFee * 1000, language)}
+              +{formatPrice(totals.codFee, language)}
             </span>
           </div>
         )}
@@ -208,7 +208,7 @@ export function CheckoutSummary({
           <div className="flex justify-between text-sm">
             <span className="text-slate-600">{t.discount[language]}</span>
             <span className="text-green-600 font-medium">
-              -{formatPrice(totals.discount * 1000, language)}
+              -{formatPrice(totals.discount, language)}
             </span>
           </div>
         )}
@@ -220,7 +220,7 @@ export function CheckoutSummary({
         )}>
           <span className="font-bold text-slate-900">{t.total[language]}</span>
           <span className="font-bold text-red-600">
-            {formatPrice(totals.total * 1000, language)}
+            {formatPrice(totals.total, language)}
           </span>
         </div>
       </div>

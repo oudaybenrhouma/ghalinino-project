@@ -68,9 +68,9 @@ export function AdminProducts() {
                 <td className="p-4">
                   <StockBadge quantity={product.quantity} size="sm" />
                 </td>
-                <td className="p-4 font-medium">{formatPrice(product.price * 1000, 'fr')}</td>
+                <td className="p-4 font-medium">{formatPrice(product.price, 'fr')}</td>
                 <td className="p-4 text-green-700 font-medium">
-                  {product.wholesale_price ? formatPrice(product.wholesale_price * 1000, 'fr') : '-'}
+                  {product.wholesale_price ? formatPrice(product.wholesale_price, 'fr') : '-'}
                 </td>
                 <td className="p-4">
                   <button 

@@ -27,7 +27,7 @@ interface OrderReviewProps {
   isLoading?: boolean;
   /** When false, the Place Order button is disabled and a warning banner is shown */
   wholesaleMinimumMet?: boolean;
-  /** Amount still needed to reach the wholesale minimum, in millimes */
+  /** Amount still needed to reach the wholesale minimum, in TND */
   wholesaleAmountShort?: number;
 }
 
@@ -196,14 +196,14 @@ export function OrderReview({
                     {language === 'ar' ? item.product.nameAr : item.product.nameFr}
                   </p>
                   <p className="text-sm text-slate-500">
-                    {item.quantity} x {formatPrice(price * 1000, language)}
+                    {item.quantity} x {formatPrice(price, language)}
                   </p>
                 </div>
                 <p className={cn(
                   'font-semibold shrink-0',
                   isWholesale && item.product.wholesalePrice ? 'text-green-600' : 'text-slate-900'
                 )}>
-                  {formatPrice(price * item.quantity * 1000, language)}
+                  {formatPrice(price * item.quantity, language)}
                 </p>
               </div>
             );
@@ -214,25 +214,25 @@ export function OrderReview({
         <div className="mt-4 pt-4 border-t border-slate-200 space-y-2">
           <div className="flex justify-between text-sm">
             <span className="text-slate-600">{t.subtotal[language]}</span>
-            <span className="text-slate-900">{formatPrice(totals.subtotal * 1000, language)}</span>
+            <span className="text-slate-900">{formatPrice(totals.subtotal, language)}</span>
           </div>
           <div className="flex justify-between text-sm">
             <span className="text-slate-600">{t.shipping[language]}</span>
             {totals.shippingFee === 0 ? (
               <span className="text-green-600">{t.shippingFree[language]}</span>
             ) : (
-              <span className="text-slate-900">{formatPrice(totals.shippingFee * 1000, language)}</span>
+              <span className="text-slate-900">{formatPrice(totals.shippingFee, language)}</span>
             )}
           </div>
           {totals.codFee > 0 && (
             <div className="flex justify-between text-sm">
               <span className="text-slate-600">{t.codFee[language]}</span>
-              <span className="text-amber-600">+{formatPrice(totals.codFee * 1000, language)}</span>
+              <span className="text-amber-600">+{formatPrice(totals.codFee, language)}</span>
             </div>
           )}
           <div className="flex justify-between text-lg pt-2 border-t border-slate-200">
             <span className="font-bold text-slate-900">{t.total[language]}</span>
-            <span className="font-bold text-red-600">{formatPrice(totals.total * 1000, language)}</span>
+            <span className="font-bold text-red-600">{formatPrice(totals.total, language)}</span>
           </div>
         </div>
       </div>

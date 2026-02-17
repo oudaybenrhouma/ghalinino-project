@@ -1,0 +1,5 @@
+   export const CART_ANIMATION_CONFIG = {
+     DRAWER_OPEN_DELAY: 150,
+     SUCCESS_STATE_DURATION: 800,
+     ERROR_STATE_DURATION: 2000,
+   } as const;

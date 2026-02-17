@@ -3,15 +3,15 @@
  * Tunisia E-commerce - Wholesale Tier System
  */
 
-import type { CartItem } from '@/types';
+import type { CartItem } from '@/contexts/CartContext';
 
 // ============================================
 // CONSTANTS
 // ============================================
 
 export const WHOLESALE_CONFIG = {
-  MINIMUM_ORDER_VALUE: 100000, // 100 TND in millimes
-  FREE_SHIPPING_THRESHOLD: 500000, // 500 TND in millimes
+  MINIMUM_ORDER_VALUE: 100,    // 100 TND
+  FREE_SHIPPING_THRESHOLD: 500, // 500 TND
   DEFAULT_DISCOUNT_TIER: 1,
   MAX_DISCOUNT_TIER: 3,
 } as const;
@@ -25,7 +25,7 @@ export interface WholesaleValidationResult {
   errors: string[];
   warnings: string[];
   minimumMet: boolean;
-  currentTotal: number;
+  currentTotal: number;    // Cart total in TND
   minimumRequired: number;
   amountShort: number;
 }
@@ -74,7 +74,7 @@ export function validateWholesaleMinimum(
     result.minimumMet = false;
     result.amountShort = result.minimumRequired - result.currentTotal;
     result.errors.push(
-      `Minimum order value not met. Add ${(result.amountShort / 1000).toFixed(3)} TND more to checkout.`
+      `Minimum order value not met. Add ${result.amountShort.toFixed(3)} TND more to checkout.`
     );
   }
 

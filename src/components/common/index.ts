@@ -7,3 +7,4 @@ export { Button } from './Button';
 export { LanguageToggle } from './LanguageToggle';
 export { OrderStatusBadge } from './OrderStatusBadge';
 export { ToastNotifications } from './ToastNotifications';
+export { ErrorBoundary, SectionErrorBoundary } from './ErrorBoundary';

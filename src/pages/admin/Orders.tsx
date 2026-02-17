@@ -147,7 +147,7 @@ export function AdminOrders() {
                   <OrderStatusBadge status={order.status} type="order" />
                 </td>
                 <td className="p-4 text-right font-bold">
-                  {formatPrice(order.total * 1000, 'fr')}
+                  {formatPrice(order.total, 'fr')}
                 </td>
                 <td className="p-4 text-right">
                   <Link to={`/admin/orders/${order.id}`}>

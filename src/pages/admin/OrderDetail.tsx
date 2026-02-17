@@ -99,15 +99,15 @@ export function AdminOrderDetail() {
                     <p className="text-xs text-slate-500">SKU: {item.product_snapshot.sku || 'N/A'}</p>
                   </div>
                   <div className="text-right">
-                    <p className="font-medium">{formatPrice(item.total_price * 1000, 'fr')}</p>
-                    <p className="text-xs text-slate-500">{item.quantity} x {formatPrice(item.unit_price * 1000, 'fr')}</p>
+                    <p className="font-medium">{formatPrice(item.total_price, 'fr')}</p>
+                    <p className="text-xs text-slate-500">{item.quantity} x {formatPrice(item.unit_price, 'fr')}</p>
                   </div>
                 </div>
               ))}
             </div>
             <div className="mt-4 pt-4 border-t border-slate-200 flex justify-between items-center font-bold">
               <span>Total</span>
-              <span className="text-lg">{formatPrice(order.total * 1000, 'fr')}</span>
+              <span className="text-lg">{formatPrice(order.total, 'fr')}</span>
             </div>
           </div>
 

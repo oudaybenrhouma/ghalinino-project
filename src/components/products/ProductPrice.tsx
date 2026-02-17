@@ -14,8 +14,8 @@ import { cn } from '@/lib/utils';
 // ============================================
 
 export interface ProductPriceProps {
-  price: number; // Retail price in millimes
-  wholesalePrice?: number | null; // Wholesale price in millimes
+  price: number; // Retail price in TND
+  wholesalePrice?: number | null; // Wholesale price in TND
   compareAtPrice?: number | null; // Original price (for sales)
   size?: 'sm' | 'md' | 'lg' | 'xl';
   showSavings?: boolean;

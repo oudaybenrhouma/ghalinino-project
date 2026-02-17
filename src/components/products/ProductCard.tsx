@@ -29,6 +29,7 @@ import { ProductPriceCompact } from './ProductPrice';
 import { VolumeDiscountBadge } from './VolumeDiscounts';
 
 import type { Product, Category } from '@/types/database';
+import { CART_ANIMATION_CONFIG } from '@/lib/constants';
 
 // ============================================================================
 // TYPES
@@ -78,38 +79,37 @@ export function ProductCard({ product, className }: ProductCardProps) {
   const name = language === 'ar' ? product.name_ar : product.name_fr;
   const isOutOfStock = product.quantity <= 0;
 
-  const handleAddToCart = useCallback(
-    async (e: React.MouseEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-
-      if (isOutOfStock || isAdding) return;
-
-      setIsAdding(true);
-
-      try {
-        const result = await addToCart(product.id, 1);
-
-        if (result.success) {
-          // Brief delay so the user sees the green ✓ state before the drawer
-          // slides in — gives a clear cause-and-effect feeling.
-          setTimeout(() => openCart(), 150);
-        }
-        // Errors are already handled inside CartContext (it shows notifications).
-      } catch (error) {
-        console.error('Add to cart error:', error);
-      } finally {
-        // Keep the ✓ state visible for 1.5 s so users register the feedback.
-        setTimeout(() => setIsAdding(false), 1500);
-      }
-    },
-    // openCart is intentionally excluded because its reference changes but
-    // its identity is stable (it just calls setIsCartOpen(true)).  We capture
-    // it via the CartContext at call time, not at definition time, through the
-    // closure over `openCart` that was destructured above.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [product.id, isOutOfStock, isAdding, addToCart]
-  );
+const handleAddToCart = useCallback(
+     async (e: React.MouseEvent) => {
+       e.preventDefault();
+       e.stopPropagation();
+   
+       if (isOutOfStock || isAdding) return;
+   
+       setIsAdding(true);
+   
+       try {
+         const result = await addToCart(product.id, 1);
+   
+         if (result.success) {
+           setTimeout(() => {
+             openCart();
+             setIsAdding(false); // Unblock immediately after opening
+           }, CART_ANIMATION_CONFIG.DRAWER_OPEN_DELAY);
+         } else {
+           setTimeout(() => {
+             setIsAdding(false);
+           }, CART_ANIMATION_CONFIG.ERROR_STATE_DURATION);
+         }
+       } catch (error) {
+         console.error('Add to cart error:', error);
+         setTimeout(() => {
+           setIsAdding(false);
+         }, CART_ANIMATION_CONFIG.ERROR_STATE_DURATION);
+       }
+     },
+     [product.id, isOutOfStock, isAdding, addToCart, openCart]
+   );
 
   return (
     <Link

@@ -118,7 +118,7 @@ export function CartSummary({ compact = false, onCheckout }: CartSummaryProps) {
           <div className="bg-green-50 border border-green-200 rounded-lg p-3 mb-4">
             <p className="text-sm text-green-700">
               {formatPrice(
-                freeShippingProgress.amountRemaining * 1000,
+                freeShippingProgress.amountRemaining,
                 language
               )}{' '}
               {language === 'ar'
@@ -142,7 +142,7 @@ export function CartSummary({ compact = false, onCheckout }: CartSummaryProps) {
           {language === 'ar' ? 'المجموع الفرعي' : 'Sous-total'}
         </span>
         <span className="font-semibold text-slate-900">
-          {formatPrice(subtotal * 1000, language)}
+          {formatPrice(subtotal, language)}
         </span>
       </div>
 
@@ -164,7 +164,7 @@ export function CartSummary({ compact = false, onCheckout }: CartSummaryProps) {
                 ? 'مجاني'
                 : 'Gratuit'
               : formatPrice(
-                  shippingCalculation.finalShipping * 1000,
+                  shippingCalculation.finalShipping,
                   language
                 )}
           </span>
@@ -173,7 +173,7 @@ export function CartSummary({ compact = false, onCheckout }: CartSummaryProps) {
             !shippingCalculation.isFree && (
               <span className="text-xs text-green-600">
                 (-{formatPrice(
-                  shippingCalculation.wholesaleDiscount * 1000,
+                  shippingCalculation.wholesaleDiscount,
                   language
                 )})
               </span>
@@ -187,7 +187,7 @@ export function CartSummary({ compact = false, onCheckout }: CartSummaryProps) {
           {language === 'ar' ? 'المجموع' : 'Total'}
         </span>
         <span className="text-xl font-bold text-red-600">
-          {formatPrice(total * 1000, language)}
+          {formatPrice(total, language)}
         </span>
       </div>
 

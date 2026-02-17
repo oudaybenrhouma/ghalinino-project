@@ -12,7 +12,7 @@ import { PaymentProofModal } from '@/components/account/PaymentProofModal';
 import { Button } from '@/components/common';
 import { formatPrice } from '@/lib/utils';
 import { useState } from 'react';
-
+import { AccountLayout } from '@/components/layout';
 export function OrderDetailPage() {
   const { id } = useParams<{ id: string }>();
   const { order, isLoading, error } = useOrderDetail(id);
@@ -41,6 +41,7 @@ export function OrderDetailPage() {
   }
 
   return (
+    <AccountLayout>
     <div className="max-w-4xl mx-auto px-4 py-8">
       {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
@@ -178,5 +179,6 @@ export function OrderDetailPage() {
         />
       )}
     </div>
+    </AccountLayout>
   );
 }

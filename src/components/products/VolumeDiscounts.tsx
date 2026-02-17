@@ -15,7 +15,7 @@ import { cn } from '@/lib/utils';
 
 export interface VolumeDiscountsProps {
   productId?: string;
-  basePrice: number; // Price per unit in millimes
+  basePrice: number; // Price per unit in TND
   className?: string;
 }
 

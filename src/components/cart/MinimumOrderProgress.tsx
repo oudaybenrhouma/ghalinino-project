@@ -14,7 +14,7 @@ import { cn } from '@/lib/utils';
 // ============================================
 
 export interface MinimumOrderProgressProps {
-  currentTotal: number; // Cart total in millimes
+  currentTotal: number; // Cart total in TND
   className?: string;
 }
 

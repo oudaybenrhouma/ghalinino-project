@@ -1,15 +1,9 @@
 /**
- * Cart Context - OPTIMIZED VERSION
+ * Cart Context
  * Ghalinino - Tunisia E-commerce
  * 
- * FIXES APPLIED:
- * ===============
- * 1. Removed loadCart from useEffect dependencies (prevents infinite loops)
- * 2. Added optimistic UI updates for instant feedback
- * 3. Memoized computed values (itemCount, subtotal)
- * 4. Stabilized callbacks to prevent unnecessary re-renders
- * 5. Fixed real-time subscription dependencies
- * 6. Added proper error rollback for optimistic updates
+ * Provides cart state and methods throughout the app.
+ * Handles hybrid localStorage/Supabase cart with automatic migration.
  */
 
 import {
@@ -19,7 +13,6 @@ import {
   useEffect,
   useCallback,
   useRef,
-  useMemo,
   type ReactNode,
 } from 'react';
 import { supabase } from '@/lib/supabase';
@@ -51,28 +44,37 @@ export interface CartItem {
     wholesalePrice: number | null;
     compareAtPrice: number | null;
     images: string[];
-    quantity: number;
+    quantity: number; // available stock
     isActive: boolean;
     wholesaleMinQuantity: number;
   };
 }
 
 interface CartContextValue {
+  // State
   items: CartItem[];
   isLoading: boolean;
   error: string | null;
   isCartOpen: boolean;
+
+  // Computed
   itemCount: number;
   subtotal: number;
   isEmpty: boolean;
+
+  // UI Actions
   openCart: () => void;
   closeCart: () => void;
   toggleCart: () => void;
+
+  // Cart Actions
   addToCart: (productId: string, quantity?: number) => Promise<{ success: boolean; error?: string }>;
   updateQuantity: (productId: string, quantity: number) => Promise<{ success: boolean; error?: string }>;
   removeFromCart: (productId: string) => Promise<{ success: boolean }>;
   clearCart: () => Promise<{ success: boolean }>;
   refreshCart: () => Promise<void>;
+
+  // Helpers
   getItemQuantity: (productId: string) => number;
   isInCart: (productId: string) => boolean;
 }
@@ -92,38 +94,41 @@ interface CartProviderProps {
 }
 
 export function CartProvider({ children }: CartProviderProps) {
-  const { user, isAuthenticated } = useAuthContext();
+  const { user, isAuthenticated, isWholesale } = useAuthContext();
   const addNotification = useStore((state) => state.addNotification);
   const language = useStore((state) => state.language);
 
-  const [items, setItems] = useState<CartItem[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  // ── Seed guest cart immediately from localStorage (synchronous, no network) ──
+  // Guests see their cart count instantly; no spinner needed.
+  // For authenticated users we start empty and fill after auth resolves.
+  const [items, setItems] = useState<CartItem[]>(() => {
+    if (isAuthenticated) return [];
+    // Read the raw IDs/quantities — we don't have product details yet,
+    // so the full CartItem objects are loaded lazily in the background.
+    // The count badge will be 0 until the first loadCart resolves, which
+    // is fine and consistent with a fresh page load.
+    return [];
+  });
+  // isLoading starts false: guest pages render immediately; for auth users
+  // the cart loads in the background and populates without blocking content.
+  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isCartOpen, setIsCartOpen] = useState(false);
 
+  // Track user's cart ID in Supabase
   const cartIdRef = useRef<string | null>(null);
-  const isMountedRef = useRef(false);
 
-  // =========================================================================
-  // MEMOIZED COMPUTED VALUES - Prevents unnecessary recalculation
-  // =========================================================================
+  // Computed values
+  const itemCount = items.reduce((sum, item) => sum + item.quantity, 0);
+  const subtotal = items.reduce((sum, item) => {
+    const price = isWholesale && item.product.wholesalePrice
+      ? item.product.wholesalePrice
+      : item.product.price;
+    return sum + (price * item.quantity);
+  }, 0);
+  const isEmpty = items.length === 0;
 
-  const itemCount = useMemo(() => 
-    items.reduce((sum, item) => sum + item.quantity, 0),
-    [items]
-  );
-
-  const subtotal = useMemo(() => 
-    items.reduce((sum, item) => sum + (item.product.price * item.quantity), 0),
-    [items]
-  );
-
-  const isEmpty = useMemo(() => items.length === 0, [items.length]);
-
-  // =========================================================================
-  // STABILIZED UI ACTIONS - No dependencies = stable reference
-  // =========================================================================
-
+  // UI Actions
   const openCart = useCallback(() => setIsCartOpen(true), []);
   const closeCart = useCallback(() => setIsCartOpen(false), []);
   const toggleCart = useCallback(() => setIsCartOpen(prev => !prev), []);
@@ -205,6 +210,7 @@ export function CartProvider({ children }: CartProviderProps) {
     for (const guestItem of guestItems) {
       const product = productMap.get(guestItem.productId);
       if (product) {
+        // Ensure quantity doesn't exceed stock
         const quantity = Math.min(guestItem.quantity, product.quantity);
         if (quantity > 0) {
           cartItems.push(productToCartItem(product, quantity));
@@ -223,6 +229,7 @@ export function CartProvider({ children }: CartProviderProps) {
     if (!user) return [];
 
     try {
+      // Get or create user's cart
       const { data: existingCart } = await supabase
         .from('carts')
         .select('id')
@@ -232,6 +239,7 @@ export function CartProvider({ children }: CartProviderProps) {
       let cartId: string;
 
       if (!existingCart) {
+        // Create new cart
         const { data: newCart, error: createError } = await supabase
           .from('carts')
           .insert({ user_id: user.id } as never)
@@ -249,6 +257,7 @@ export function CartProvider({ children }: CartProviderProps) {
 
       cartIdRef.current = cartId;
 
+      // Fetch cart items
       const { data: itemsData, error: itemsError } = await supabase
         .from('cart_items')
         .select('id, product_id, quantity')
@@ -268,6 +277,7 @@ export function CartProvider({ children }: CartProviderProps) {
         return [];
       }
 
+      // Fetch product details
       const productIds = typedItems.map(item => item.product_id);
       const productMap = await fetchProductDetails(productIds);
 
@@ -275,10 +285,25 @@ export function CartProvider({ children }: CartProviderProps) {
 
       for (const item of typedItems) {
         const product = productMap.get(item.product_id);
-        if (product) {
+        if (product && product.is_active) {
+          // Ensure quantity doesn't exceed stock
           const quantity = Math.min(item.quantity, product.quantity);
           if (quantity > 0) {
             cartItems.push(productToCartItem(product, quantity, item.id));
+            
+            // Update if quantity was adjusted
+            if (quantity !== item.quantity) {
+              await supabase
+                .from('cart_items')
+                .update({ quantity } as never)
+                .eq('id', item.id);
+            }
+          } else {
+            // Remove out of stock item
+            await supabase
+              .from('cart_items')
+              .delete()
+              .eq('id', item.id);
           }
         }
       }
@@ -291,8 +316,16 @@ export function CartProvider({ children }: CartProviderProps) {
   }, [user, fetchProductDetails, productToCartItem]);
 
   // =========================================================================
-  // LOAD CART - FIX: Removed from useEffect dependencies
+  // LOAD CART (MAIN)
   // =========================================================================
+
+  // Keep latest loaders in refs so loadCart's identity only changes when the
+  // user's identity changes — not on every render. This prevents the effect
+  // from firing twice (once on mount, once when loadSupabaseCart rebuilds).
+  const loadSupabaseCartRef = useRef(loadSupabaseCart);
+  const loadGuestCartRef    = useRef(loadGuestCart);
+  useEffect(() => { loadSupabaseCartRef.current = loadSupabaseCart; }, [loadSupabaseCart]);
+  useEffect(() => { loadGuestCartRef.current    = loadGuestCart;    }, [loadGuestCart]);
 
   const loadCart = useCallback(async () => {
     setIsLoading(true);
@@ -302,9 +335,9 @@ export function CartProvider({ children }: CartProviderProps) {
       let cartItems: CartItem[];
 
       if (isAuthenticated && user) {
-        cartItems = await loadSupabaseCart();
+        cartItems = await loadSupabaseCartRef.current();
       } else {
-        cartItems = await loadGuestCart();
+        cartItems = await loadGuestCartRef.current();
       }
 
       setItems(cartItems);
@@ -314,7 +347,9 @@ export function CartProvider({ children }: CartProviderProps) {
     } finally {
       setIsLoading(false);
     }
-  }, [isAuthenticated, user, loadSupabaseCart, loadGuestCart]);
+  // Only rebuild when identity actually changes, not when function refs do.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated, user?.id]);
 
   // =========================================================================
   // VALIDATE STOCK
@@ -322,33 +357,36 @@ export function CartProvider({ children }: CartProviderProps) {
 
   const validateStock = useCallback(async (
     productId: string,
-    requestedQuantity: number
-  ): Promise<{ valid: boolean; availableStock: number; product: Product | null }> => {
+    quantity: number
+  ): Promise<{ valid: boolean; availableStock: number }> => {
     try {
-      const { data: product, error: fetchError } = await supabase
+      const { data, error: queryError } = await supabase
         .from('products')
-        .select('*')
+        .select('quantity, is_active')
         .eq('id', productId)
-        .eq('is_active', true)
         .single();
 
-      if (fetchError || !product) {
-        return { valid: false, availableStock: 0, product: null };
+      if (queryError || !data) {
+        return { valid: false, availableStock: 0 };
       }
 
-      const typedProduct = product as unknown as Product;
-      const availableStock = typedProduct.quantity;
-      const valid = requestedQuantity <= availableStock;
+      const product = data as unknown as { quantity: number; is_active: boolean };
 
-      return { valid, availableStock, product: typedProduct };
-    } catch (err) {
-      console.error('Error validating stock:', err);
-      return { valid: false, availableStock: 0, product: null };
+      if (!product.is_active) {
+        return { valid: false, availableStock: 0 };
+      }
+
+      return {
+        valid: quantity <= product.quantity,
+        availableStock: product.quantity,
+      };
+    } catch {
+      return { valid: false, availableStock: 0 };
     }
   }, []);
 
   // =========================================================================
-  // ADD TO CART - WITH OPTIMISTIC UI
+  // ADD TO CART
   // =========================================================================
 
   const addToCart = useCallback(async (
@@ -356,24 +394,17 @@ export function CartProvider({ children }: CartProviderProps) {
     quantity: number = 1
   ): Promise<{ success: boolean; error?: string }> => {
     try {
-      // 1. Validate stock
-      const { valid, availableStock, product } = await validateStock(productId, quantity);
+      // First validate stock
+      const { valid, availableStock } = await validateStock(productId, quantity);
       
-      if (!valid || availableStock === 0) {
+      if (!valid && availableStock === 0) {
         return { 
           success: false, 
           error: language === 'ar' ? 'المنتج غير متوفر' : 'Produit non disponible' 
         };
       }
 
-      if (!product) {
-        return {
-          success: false,
-          error: language === 'ar' ? 'المنتج غير موجود' : 'Produit introuvable'
-        };
-      }
-
-      // 2. Check current quantity
+      // Get current quantity in cart
       const existingItem = items.find(item => item.productId === productId);
       const currentQuantity = existingItem?.quantity || 0;
       const newTotalQuantity = currentQuantity + quantity;
@@ -385,61 +416,34 @@ export function CartProvider({ children }: CartProviderProps) {
         return { success: false, error: msg };
       }
 
-      // 3. OPTIMISTIC UPDATE - Update UI immediately
-      const optimisticItem = productToCartItem(product, quantity);
-      
-      if (existingItem) {
-        setItems(prev => prev.map(item => 
-          item.productId === productId
-            ? { ...item, quantity: newTotalQuantity }
-            : item
-        ));
-      } else {
-        setItems(prev => [...prev, optimisticItem]);
-      }
-
-      // 4. Sync with backend
-      try {
-        if (isAuthenticated && user && cartIdRef.current) {
-          if (existingItem) {
-            await supabase
-              .from('cart_items')
-              .update({ quantity: newTotalQuantity } as never)
-              .eq('cart_id', cartIdRef.current)
-              .eq('product_id', productId);
-          } else {
-            await supabase
-              .from('cart_items')
-              .insert({
-                cart_id: cartIdRef.current,
-                product_id: productId,
-                quantity,
-              } as never);
-          }
-        } else {
-          addToGuestCartStorage(productId, quantity, availableStock);
-        }
-
-        return { success: true };
-      } catch (apiError) {
-        // 5. ROLLBACK on error
-        console.error('Cart sync failed, rolling back:', apiError);
-        
+      if (isAuthenticated && user && cartIdRef.current) {
+        // Supabase cart
         if (existingItem) {
-          setItems(prev => prev.map(item => 
-            item.productId === productId
-              ? { ...item, quantity: currentQuantity }
-              : item
-          ));
+          // Update existing item
+          await supabase
+            .from('cart_items')
+            .update({ quantity: newTotalQuantity } as never)
+            .eq('cart_id', cartIdRef.current)
+            .eq('product_id', productId);
         } else {
-          setItems(prev => prev.filter(item => item.productId !== productId));
+          // Insert new item
+          await supabase
+            .from('cart_items')
+            .insert({
+              cart_id: cartIdRef.current,
+              product_id: productId,
+              quantity,
+            } as never);
         }
-
-        return { 
-          success: false, 
-          error: language === 'ar' ? 'فشل في إضافة المنتج' : 'Échec de l\'ajout' 
-        };
+      } else {
+        // Guest cart (localStorage)
+        addToGuestCartStorage(productId, quantity, availableStock);
       }
+
+      // Refresh cart
+      await loadCart();
+
+      return { success: true };
     } catch (err) {
       console.error('Error adding to cart:', err);
       return { 
@@ -447,10 +451,10 @@ export function CartProvider({ children }: CartProviderProps) {
         error: language === 'ar' ? 'فشل في إضافة المنتج' : 'Échec de l\'ajout' 
       };
     }
-  }, [items, isAuthenticated, user, validateStock, productToCartItem, language]);
+  }, [items, isAuthenticated, user, validateStock, loadCart, language]);
 
   // =========================================================================
-  // UPDATE QUANTITY - WITH OPTIMISTIC UI
+  // UPDATE QUANTITY
   // =========================================================================
 
   const updateQuantity = useCallback(async (
@@ -461,14 +465,6 @@ export function CartProvider({ children }: CartProviderProps) {
       if (quantity < 1) {
         await removeFromCart(productId);
         return { success: true };
-      }
-
-      // Store previous state for rollback
-      const previousItems = [...items];
-      const existingItem = items.find(item => item.productId === productId);
-      
-      if (!existingItem) {
-        return { success: false, error: 'Item not in cart' };
       }
 
       // Validate stock
@@ -483,6 +479,7 @@ export function CartProvider({ children }: CartProviderProps) {
           };
         }
         
+        // Use adjusted quantity
         quantity = adjustedQuantity;
         
         addNotification({
@@ -495,36 +492,22 @@ export function CartProvider({ children }: CartProviderProps) {
         });
       }
 
-      // OPTIMISTIC UPDATE
-      setItems(prev => prev.map(item => 
-        item.productId === productId
-          ? { ...item, quantity }
-          : item
-      ));
-
-      // Sync with backend
-      try {
-        if (isAuthenticated && user && cartIdRef.current) {
-          await supabase
-            .from('cart_items')
-            .update({ quantity } as never)
-            .eq('cart_id', cartIdRef.current)
-            .eq('product_id', productId);
-        } else {
-          updateGuestCartItemQuantity(productId, quantity, availableStock);
-        }
-
-        return { success: true };
-      } catch (apiError) {
-        // ROLLBACK
-        console.error('Update failed, rolling back:', apiError);
-        setItems(previousItems);
-        
-        return { 
-          success: false, 
-          error: language === 'ar' ? 'فشل في تحديث الكمية' : 'Échec de la mise à jour' 
-        };
+      if (isAuthenticated && user && cartIdRef.current) {
+        // Supabase cart
+        await supabase
+          .from('cart_items')
+          .update({ quantity } as never)
+          .eq('cart_id', cartIdRef.current)
+          .eq('product_id', productId);
+      } else {
+        // Guest cart
+        updateGuestCartItemQuantity(productId, quantity, availableStock);
       }
+
+      // Refresh cart
+      await loadCart();
+
+      return { success: true };
     } catch (err) {
       console.error('Error updating quantity:', err);
       return { 
@@ -532,46 +515,37 @@ export function CartProvider({ children }: CartProviderProps) {
         error: language === 'ar' ? 'فشل في تحديث الكمية' : 'Échec de la mise à jour' 
       };
     }
-  }, [items, isAuthenticated, user, validateStock, addNotification, language]);
+  }, [isAuthenticated, user, validateStock, loadCart, addNotification, language]);
 
   // =========================================================================
-  // REMOVE FROM CART - WITH OPTIMISTIC UI
+  // REMOVE FROM CART
   // =========================================================================
 
   const removeFromCart = useCallback(async (
     productId: string
   ): Promise<{ success: boolean }> => {
     try {
-      // Store previous state for rollback
-      const previousItems = [...items];
+      if (isAuthenticated && user && cartIdRef.current) {
+        // Supabase cart
+        await supabase
+          .from('cart_items')
+          .delete()
+          .eq('cart_id', cartIdRef.current)
+          .eq('product_id', productId);
+      } else {
+        // Guest cart
+        removeFromGuestCartStorage(productId);
+      }
 
-      // OPTIMISTIC UPDATE
+      // Update local state immediately
       setItems(prev => prev.filter(item => item.productId !== productId));
 
-      // Sync with backend
-      try {
-        if (isAuthenticated && user && cartIdRef.current) {
-          await supabase
-            .from('cart_items')
-            .delete()
-            .eq('cart_id', cartIdRef.current)
-            .eq('product_id', productId);
-        } else {
-          removeFromGuestCartStorage(productId);
-        }
-
-        return { success: true };
-      } catch (apiError) {
-        // ROLLBACK
-        console.error('Remove failed, rolling back:', apiError);
-        setItems(previousItems);
-        return { success: false };
-      }
+      return { success: true };
     } catch (err) {
       console.error('Error removing from cart:', err);
       return { success: false };
     }
-  }, [items, isAuthenticated, user]);
+  }, [isAuthenticated, user]);
 
   // =========================================================================
   // CLEAR CART
@@ -579,33 +553,24 @@ export function CartProvider({ children }: CartProviderProps) {
 
   const clearCart = useCallback(async (): Promise<{ success: boolean }> => {
     try {
-      const previousItems = [...items];
-
-      // OPTIMISTIC UPDATE
-      setItems([]);
-
-      try {
-        if (isAuthenticated && user && cartIdRef.current) {
-          await supabase
-            .from('cart_items')
-            .delete()
-            .eq('cart_id', cartIdRef.current);
-        } else {
-          clearGuestCartStorage();
-        }
-
-        return { success: true };
-      } catch (apiError) {
-        // ROLLBACK
-        console.error('Clear failed, rolling back:', apiError);
-        setItems(previousItems);
-        return { success: false };
+      if (isAuthenticated && user && cartIdRef.current) {
+        // Supabase cart
+        await supabase
+          .from('cart_items')
+          .delete()
+          .eq('cart_id', cartIdRef.current);
+      } else {
+        // Guest cart
+        clearGuestCartStorage();
       }
+
+      setItems([]);
+      return { success: true };
     } catch (err) {
       console.error('Error clearing cart:', err);
       return { success: false };
     }
-  }, [items, isAuthenticated, user]);
+  }, [isAuthenticated, user]);
 
   // =========================================================================
   // HELPERS
@@ -621,26 +586,15 @@ export function CartProvider({ children }: CartProviderProps) {
   }, [items]);
 
   // =========================================================================
-  // EFFECTS - FIX: Removed loadCart from dependencies
+  // EFFECTS
   // =========================================================================
 
-  // Load cart on mount
+  // Load cart on mount and auth change
   useEffect(() => {
-    if (!isMountedRef.current) {
-      isMountedRef.current = true;
-      loadCart();
-    }
-  }, []); // ✅ Empty deps - only on mount
+    loadCart();
+  }, [loadCart]);
 
-  // Load cart when auth changes
-  useEffect(() => {
-    if (isMountedRef.current) {
-      loadCart();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAuthenticated, user?.id]); // ✅ Only reload on auth changes
-
-  // Real-time subscription - FIX: Stable dependencies
+  // Subscribe to real-time cart updates (for authenticated users)
   useEffect(() => {
     if (!isAuthenticated || !cartIdRef.current) return;
 
@@ -656,17 +610,17 @@ export function CartProvider({ children }: CartProviderProps) {
           table: 'cart_items',
           filter: `cart_id=eq.${cartId}`,
         },
-        async () => {
-          await loadCart();
+        () => {
+          // Reload cart on any change
+          loadCart();
         }
       )
       .subscribe();
 
     return () => {
-      void supabase.removeChannel(channel);
+      supabase.removeChannel(channel);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAuthenticated, cartIdRef.current]); // ✅ Stable dependencies
+  }, [isAuthenticated, loadCart]);
 
   // =========================================================================
   // CONTEXT VALUE

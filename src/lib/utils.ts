@@ -24,15 +24,12 @@ export function cn(...inputs: ClassValue[]) {
 
 /**
  * Format price in TND (Tunisian Dinar)
- * Stores prices in millimes (1 TND = 1000 millimes)
- * @param millimes - Price in millimes
+ * @param tnd - Price in TND (e.g. 89.900)
  * @param language - Display language
  */
-export function formatPrice(millimes: number, language: Language = 'ar'): string {
-  const dinars = millimes / 1000;
-  
+export function formatPrice(tnd: number, language: Language = 'ar'): string {
   // Format with 3 decimal places (Tunisian Dinar has 3 decimal places)
-  const formatted = dinars.toLocaleString(language === 'ar' ? 'ar-TN' : 'fr-TN', {
+  const formatted = tnd.toLocaleString(language === 'ar' ? 'ar-TN' : 'fr-TN', {
     minimumFractionDigits: 3,
     maximumFractionDigits: 3,
   });
@@ -42,11 +39,11 @@ export function formatPrice(millimes: number, language: Language = 'ar'): string
 }
 
 /**
- * Parse price string to millimes
+ * Parse price string to TND
  */
 export function parsePrice(priceString: string): number {
   const cleaned = priceString.replace(/[^\d.,]/g, '').replace(',', '.');
-  return Math.round(parseFloat(cleaned) * 1000);
+  return parseFloat(cleaned);
 }
 
 /**
@@ -125,23 +122,23 @@ export function getGovernorate(id: Governorate): GovernorateInfo | undefined {
 }
 
 /**
- * Get shipping price by zone (in millimes)
+ * Get shipping price by zone (in TND)
  */
 export function getShippingPrice(governorate: Governorate): number {
   const gov = getGovernorate(governorate);
-  if (!gov) return 8000; // Default 8 TND
+  if (!gov) return 8; // Default 8 TND
   
   switch (gov.shippingZone) {
     case 'grand_tunis':
-      return 5000; // 5 TND
+      return 5; // 5 TND
     case 'north':
-      return 7000; // 7 TND
+      return 7; // 7 TND
     case 'center':
-      return 8000; // 8 TND
+      return 8; // 8 TND
     case 'south':
-      return 10000; // 10 TND
+      return 10; // 10 TND
     default:
-      return 8000;
+      return 8;
   }
 }
 

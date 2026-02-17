@@ -11,6 +11,7 @@ import { OrderStatusBadge } from '@/components/common/OrderStatusBadge';
 import { Button } from '@/components/common';
 import { formatPrice, cn } from '@/lib/utils';
 import type { OrderStatus } from '@/types/database';
+import { AccountLayout } from '@/components/layout';
 
 export function OrderHistoryPage() {
   const { orders, isLoading, error } = useOrders();
@@ -41,7 +42,9 @@ export function OrderHistoryPage() {
   }
 
   return (
+    <AccountLayout>
     <div className="max-w-4xl mx-auto px-4 py-8">
+      
       <h1 className="text-2xl font-bold mb-6">
         {language === 'ar' ? 'طلباتي' : 'Mes Commandes'}
       </h1>
@@ -118,5 +121,7 @@ export function OrderHistoryPage() {
         </div>
       )}
     </div>
+      </AccountLayout>
+
   );
 }

@@ -159,7 +159,7 @@ export function CartItem({ item, compact = false }: CartItemProps) {
             showWholesalePrice ? 'text-green-600' : 'text-slate-700',
             compact ? 'text-sm' : 'text-base'
           )}>
-            {formatPrice(unitPrice * 1000, language)}
+            {formatPrice(unitPrice, language)}
           </span>
           
           {showWholesalePrice && (
@@ -226,7 +226,7 @@ export function CartItem({ item, compact = false }: CartItemProps) {
             compact ? 'text-sm' : 'text-base',
             showWholesalePrice ? 'text-green-600' : 'text-slate-900'
           )}>
-            {formatPrice(lineTotal * 1000, language)}
+            {formatPrice(lineTotal, language)}
           </span>
         </div>
       </div>

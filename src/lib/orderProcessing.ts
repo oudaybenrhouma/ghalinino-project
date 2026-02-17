@@ -3,34 +3,11 @@
  * Ghalinino - Tunisia E-commerce
  *
  * Handles atomic order creation using Supabase RPC.
+ * All monetary values are in TND — the same unit used in the database
+ * (DECIMAL 10,2) and returned by product queries.
  *
- * ─── BUG FIXES ────────────────────────────────────────────────────────────────
- *
- * 1. payment_status: 'unpaid' → 'pending'
- *    The DB enum is: pending | paid | failed | refunded
- *    'unpaid' does not exist → Postgres returns 400 immediately.
- *    All three payment handlers now pass 'pending' as the initial status.
- *
- * 2. Millimes → TND conversion on all monetary values sent to the RPC
- *    - The codebase stores prices in millimes (7000 = 7 TND).
- *    - DB columns are DECIMAL(10,2), meaning Postgres expects TND (7.000).
- *    - orderProcessing.ts was forwarding raw millime values directly into the
- *      RPC payload:  subtotal, shipping_cost, total, unit_price, total_price.
- *    - Fix: divide every monetary value by 1000 before the RPC call.
- *    - checkout.ts's calculateCheckoutTotals also uses millimes internally,
- *      so totals.subtotal, totals.shippingFee, totals.total all need /1000.
- *
- * 3. Shipping recalculation removed from orderProcessing
- *    - orderProcessing was importing calculateShipping() from shipping.ts
- *      (which returns millimes) and overriding the shipping value already
- *      calculated by the checkout page. This introduced a second source of
- *      truth and the wrong unit. Now we trust totals.shippingFee directly
- *      (converted from millimes to TND), which is what the user saw on screen.
- *
- * 4. items type: CartContext.CartItem vs useCart.CartItemWithProduct
- *    Both types have the same runtime shape. The CreateOrderParams.items type
- *    is now typed as the CartContext CartItem to match what CheckoutPage passes.
- * ─────────────────────────────────────────────────────────────────────────────
+ * payment_status initial value is 'pending' for all payment methods.
+ * The DB enum is: pending | paid | failed | refunded.
  */
 
 import { supabase } from '@/lib/supabase';
@@ -50,11 +27,11 @@ export interface OrderCartItem {
     id: string;
     nameAr: string;
     nameFr: string;
-    price: number;          // millimes
-    wholesalePrice: number | null; // millimes
-    compareAtPrice: number | null; // millimes
+    price: number;                 // TND — as stored in DB
+    wholesalePrice: number | null; // TND — as stored in DB
+    compareAtPrice: number | null; // TND — as stored in DB
     images: string[];
-    quantity: number;       // stock
+    quantity: number;              // stock units
     isActive: boolean;
     wholesaleMinQuantity: number;
   };
@@ -66,7 +43,7 @@ export interface CreateOrderParams {
   guestPhone?: string;
   shippingAddress: ShippingAddress;
   paymentMethod: PaymentMethodType;
-  totals: CheckoutTotals;    // all values in millimes
+  totals: CheckoutTotals; // all values in TND
   items: OrderCartItem[];
   isWholesaleOrder: boolean;
   notes?: string;
@@ -83,31 +60,25 @@ export interface OrderResult {
 // HELPERS
 // ============================================================================
 
-/** Convert millimes to TND for DB storage */
-const toTND = (millimes: number): number =>
-  Math.round((millimes / 1000) * 1000) / 1000; // keep 3 decimal places
-
 export function formatOrderNumber(id: string): string {
   return id;
 }
 
 /**
  * Convert CartItems to the RPC item format.
- * unit_price and total_price are converted from millimes → TND.
+ * Prices are already in TND — no conversion needed.
  */
 function prepareOrderItems(items: OrderCartItem[], isWholesale: boolean) {
   return items.map((item) => {
     const product = item.product;
 
-    // Determine which price applies (still in millimes here)
-    const unitPriceMillimes =
+    // Pick the applicable unit price (TND)
+    const unitPrice =
       isWholesale && product.wholesalePrice
         ? product.wholesalePrice
         : product.price;
 
-    // Convert to TND for the DB
-    const unitPrice = toTND(unitPriceMillimes);
-    const totalPrice = unitPrice * item.quantity;
+    const totalPrice = Math.round(unitPrice * item.quantity * 1000) / 1000;
 
     const snapshot: ProductSnapshot = {
       id: product.id,
@@ -120,7 +91,8 @@ function prepareOrderItems(items: OrderCartItem[], isWholesale: boolean) {
     return {
       product_id: item.productId,
       quantity: item.quantity,
-      unit_price: unitPrice,       // TND
+      unit_price: unitPrice,   // TND
+      total_price: totalPrice, // TND
       product_snapshot: snapshot,
       is_wholesale_price: isWholesale && !!product.wholesalePrice,
     };
@@ -133,14 +105,10 @@ function prepareOrderItems(items: OrderCartItem[], isWholesale: boolean) {
 
 /**
  * Creates an order atomically via the create_order RPC function.
- *
- * payment_status must be one of: pending | paid | failed | refunded
- * All monetary values sent to the RPC must be in TND (not millimes).
+ * All monetary values are in TND, matching DB column types (DECIMAL 10,2).
  */
 async function createOrder(
   params: CreateOrderParams,
-  // FIX: 'unpaid' does not exist in the DB enum — use 'pending' for all
-  // pre-payment states. The admin panel updates to 'paid' once confirmed.
   initialPaymentStatus: 'paid' | 'pending' = 'pending'
 ): Promise<OrderResult> {
   const {
@@ -156,15 +124,14 @@ async function createOrder(
   } = params;
 
   try {
-    // FIX: convert all monetary totals from millimes → TND
-    // totals.subtotal, totals.shippingFee, totals.codFee, totals.total
-    // are all produced by calculateCheckoutTotals() which works in millimes.
-    const subtotalTND   = toTND(totals.subtotal);
-    const shippingTND   = toTND(totals.shippingFee);
-    const codFeeTND     = toTND(totals.codFee);
-    const discountTND   = toTND(totals.discount);
-    // total = subtotal + shipping + codFee - discount (recalculate in TND to avoid rounding drift)
-    const totalTND      = Math.max(0, subtotalTND + shippingTND + codFeeTND - discountTND);
+    // All totals are already in TND — pass them straight through.
+    // Recalculate total from parts to avoid floating-point drift.
+    const total = Math.max(
+      0,
+      Math.round(
+        (totals.subtotal + totals.shippingFee + totals.codFee - totals.discount) * 1000
+      ) / 1000
+    );
 
     const orderData = {
       user_id: userId || null,
@@ -173,12 +140,12 @@ async function createOrder(
       customer_name: shippingAddress.fullName,
       status: 'pending',
       payment_method: paymentMethod,
-      payment_status: initialPaymentStatus,  // FIX: 'pending' not 'unpaid'
-      subtotal: subtotalTND,                 // FIX: TND not millimes
-      shipping_cost: shippingTND,            // FIX: TND not millimes
-      discount_amount: discountTND,          // FIX: TND not millimes
+      payment_status: initialPaymentStatus,
+      subtotal: totals.subtotal,
+      shipping_cost: totals.shippingFee,
+      discount_amount: totals.discount,
       tax_amount: 0,
-      total: totalTND,                       // FIX: TND not millimes
+      total,
       shipping_address: shippingAddress,
       billing_address: shippingAddress,
       notes: notes || null,
@@ -200,7 +167,6 @@ async function createOrder(
           'Some items in your cart are no longer available in the requested quantity.'
         );
       }
-      // Surface the actual Postgres error message so it's visible in the console
       throw new Error(error.message || 'RPC error');
     }
 

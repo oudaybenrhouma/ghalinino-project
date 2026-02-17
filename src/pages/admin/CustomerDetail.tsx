@@ -362,7 +362,7 @@ export function AdminCustomerDetail() {
                     </span>
                   </div>
                   <div className="flex justify-between items-center">
-                    <span className="font-bold text-sm">{formatPrice(order.total * 1000, 'fr')}</span>
+                    <span className="font-bold text-sm">{formatPrice(order.total, 'fr')}</span>
                     <span
                       className={`px-2 py-0.5 text-[10px] rounded-full capitalize ${
                         order.status === 'delivered'

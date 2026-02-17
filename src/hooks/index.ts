@@ -12,3 +12,5 @@ export { useCart } from './useCart';
 export type { ProductFilters, ProductSortOption, UseProductsOptions, ProductWithCategory } from './useProducts';
 export type { ProductDetail, UseProductDetailOptions } from './useProductDetail';
 export type { CartItemWithProduct, CartSummary as CartSummaryType, UseCartReturn } from './useCart';
+export { useScrollRestoration, useScrollControl, clearAllScrollPositions } from './useScrollRestoration';
+

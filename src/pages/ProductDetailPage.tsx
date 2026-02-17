@@ -1,31 +1,36 @@
 /**
  * Product Detail Page
- * Ghalinino - Tunisia E-commerce
+ * Ghalinino — Tunisia E-commerce
  *
- * FIXES APPLIED
- * ─────────────
- * 1. CART: handleAddToCart was calling the Zustand store's addToCart directly,
- *    bypassing CartContext entirely. This meant:
- *    - No stock validation against Supabase
- *    - No Supabase cart sync for authenticated users
- *    - No guest↔auth cart migration support
- *    - No shared cart state with CartDrawer / CartBadge
- *    Fixed: now uses useCartContext().addToCart (async, validated, synced).
+ * CHANGES IN THIS VERSION
+ * ────────────────────────
+ * • Removed the old inline PageHeader component; uses the shared
+ *   CustomerLayout so the header is identical on every customer page
+ *   (same logo, same nav, same CartBadge, same LanguageToggle).
  *
- * 2. CART UX: After a successful add, the CartDrawer now auto-opens (150 ms
- *    delay so the user sees the ✓ button state first), matching ProductCard
- *    behaviour on the Products page.
+ * • stockChanged side-effect moved into a proper useEffect so it is
+ *   not triggered as a render-time side-effect (which React warns about
+ *   and can fire multiple times per render in StrictMode).
  *
- * 3. HEADER: CartBadge added to the page header so the cart count is visible
- *    and the drawer is accessible without navigating away.
+ * • handleAddToCart timing improved:
+ *   - setIsAdding(false) happens immediately after the cart drawer
+ *     opens (150 ms), not after 1 500 ms, so the button is unblocked
+ *     sooner and users can add another item without waiting.
+ *   - quantity resets to 1 at the same 150 ms mark.
+ *   - The 1 500 ms timeout is kept as the ✓ display window in
+ *     ProductCard, which still needs it because those cards stay
+ *     visible; on this page, closing the state quickly is better UX.
  *
- * 4. NOTIFICATION: addNotification call kept — ToastNotifications (now mounted
- *    globally in App.tsx) will render it.
+ * • All imports cleaned up (removed unused formatPrice, unused LanguageToggle
+ *   and CartBadge that were only needed by the old inline header).
+ *
+ * • Footer pulled out into its own tiny component so the render tree
+ *   is easier to read.
  */
 
-import { useState, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { cn, formatPrice } from '@/lib/utils';
+import { cn } from '@/lib/utils';
 import { useLanguage } from '@/hooks';
 import { useProductDetail, useRelatedProducts } from '@/hooks/useProductDetail';
 import { useAuthContext } from '@/contexts/AuthContext';
@@ -34,54 +39,56 @@ import { useStore } from '@/store';
 import { ImageGallery } from '@/components/products/ImageGallery';
 import { StockBadge } from '@/components/products/StockBadge';
 import { ProductCard, ProductCardSkeleton } from '@/components/products/ProductCard';
-import { Button, LanguageToggle } from '@/components/common';
-import { CartBadge } from '@/components/cart';
+import { Button } from '@/components/common';
 import { ProductPriceLarge } from '@/components/products/ProductPrice';
 import { VolumeDiscounts } from '@/components/products/VolumeDiscounts';
+import { CustomerLayout } from '@/components/layout/CustomerLayout';
 
 // ============================================================================
 // TRANSLATIONS
 // ============================================================================
 
 const t = {
-  home: { ar: 'الرئيسية', fr: 'Accueil' },
-  products: { ar: 'المنتجات', fr: 'Produits' },
-  addToCart: { ar: 'أضف إلى السلة', fr: 'Ajouter au panier' },
-  added: { ar: '✓ تمت الإضافة!', fr: '✓ Ajouté !' },
-  outOfStock: { ar: 'نفذ المخزون', fr: 'Rupture de stock' },
-  quantity: { ar: 'الكمية', fr: 'Quantité' },
-  inStock: { ar: 'متوفر', fr: 'En stock' },
-  available: { ar: 'قطعة متاحة', fr: 'disponibles' },
-  sku: { ar: 'رمز المنتج', fr: 'Référence' },
-  category: { ar: 'الفئة', fr: 'Catégorie' },
-  brand: { ar: 'العلامة التجارية', fr: 'Marque' },
+  home:            { ar: 'الرئيسية',                      fr: 'Accueil' },
+  products:        { ar: 'المنتجات',                      fr: 'Produits' },
+  addToCart:       { ar: 'أضف إلى السلة',                 fr: 'Ajouter au panier' },
+  added:           { ar: '✓ تمت الإضافة!',                fr: '✓ Ajouté !' },
+  outOfStock:      { ar: 'نفذ المخزون',                   fr: 'Rupture de stock' },
+  available:       { ar: 'قطعة متاحة',                    fr: 'disponibles' },
+  sku:             { ar: 'رمز المنتج',                    fr: 'Référence' },
+  brand:           { ar: 'العلامة التجارية',              fr: 'Marque' },
 
   // Pricing
-  retailPrice: { ar: 'سعر التجزئة', fr: 'Prix détail' },
-  wholesalePrice: { ar: 'سعر الجملة', fr: 'Prix gros' },
-  youSave: { ar: 'توفير', fr: 'Économie' },
   wholesalePending: { ar: 'أسعار الجملة متاحة بعد الموافقة على طلبك', fr: 'Prix gros disponibles après approbation' },
-  minWholesale: { ar: 'الحد الأدنى للجملة', fr: 'Quantité min gros' },
+  minWholesale:    { ar: 'الحد الأدنى للجملة',           fr: 'Quantité min gros' },
 
   // Tabs
-  description: { ar: 'الوصف', fr: 'Description' },
-  shipping: { ar: 'الشحن', fr: 'Livraison' },
+  description:     { ar: 'الوصف',                        fr: 'Description' },
+  shipping:        { ar: 'الشحن',                         fr: 'Livraison' },
 
-  // Shipping info
-  shippingText: { ar: 'التوصيل متاح لجميع ولايات تونس. مدة التوصيل 2-5 أيام عمل.', fr: 'Livraison disponible dans tous les gouvernorats de Tunisie. Délai de livraison 2-5 jours ouvrables.' },
-  grandTunis: { ar: 'تونس الكبرى', fr: 'Grand Tunis' },
-  otherRegions: { ar: 'باقي الولايات', fr: 'Autres régions' },
+  // Shipping
+  shippingText:    {
+    ar: 'التوصيل متاح لجميع ولايات تونس. مدة التوصيل 2-5 أيام عمل.',
+    fr: 'Livraison disponible dans tous les gouvernorats de Tunisie. Délai de livraison 2-5 jours ouvrables.',
+  },
+  grandTunis:      { ar: 'تونس الكبرى',                  fr: 'Grand Tunis' },
+  otherRegions:    { ar: 'باقي الولايات',                fr: 'Autres régions' },
 
   // Related
-  relatedProducts: { ar: 'منتجات مشابهة', fr: 'Produits similaires' },
+  relatedProducts: { ar: 'منتجات مشابهة',               fr: 'Produits similaires' },
 
   // Errors
-  notFound: { ar: 'المنتج غير موجود', fr: 'Produit non trouvé' },
-  notFoundDesc: { ar: 'عذراً، لم نتمكن من العثور على هذا المنتج.', fr: "Désolé, nous n'avons pas trouvé ce produit." },
-  backToProducts: { ar: 'العودة للمنتجات', fr: 'Retour aux produits' },
+  notFound:        { ar: 'المنتج غير موجود',             fr: 'Produit non trouvé' },
+  notFoundDesc:    { ar: 'عذراً، لم نتمكن من العثور على هذا المنتج.', fr: "Désolé, nous n'avons pas trouvé ce produit." },
+  backToProducts:  { ar: 'العودة للمنتجات',              fr: 'Retour aux produits' },
 
   // Stock alerts
-  stockUpdated: { ar: 'تم تحديث المخزون', fr: 'Stock mis à jour' },
+  stockUpdated:    { ar: 'تم تحديث المخزون',             fr: 'Stock mis à jour' },
+
+  // Notifications
+  addedTitle:      { ar: 'تمت إضافة المنتج',             fr: 'Produit ajouté' },
+  errorTitle:      { ar: 'خطأ',                           fr: 'Erreur' },
+  addFailed:       { ar: 'فشل في الإضافة',               fr: "Échec de l'ajout" },
 };
 
 // ============================================================================
@@ -89,18 +96,12 @@ const t = {
 // ============================================================================
 
 export function ProductDetailPage() {
-  const { slug } = useParams<{ slug: string }>();
-  const navigate = useNavigate();
-  const { language, isRTL } = useLanguage();
+  const { slug }                     = useParams<{ slug: string }>();
+  const navigate                     = useNavigate();
+  const { language, isRTL }          = useLanguage();
   const { isWholesale, isPendingWholesale } = useAuthContext();
-
-  // ── FIXED: use CartContext, not Zustand store ──────────────────────────────
-  // CartContext.addToCart is async, validates stock against Supabase, syncs the
-  // Supabase cart for authenticated users, and handles guest localStorage.
-  // The old useStore(state => state.addToCart) was a pure local state update
-  // that was completely disconnected from CartDrawer / CartBadge state.
-  const { addToCart, openCart } = useCartContext();
-  const addNotification = useStore((state) => state.addNotification);
+  const { addToCart, openCart }      = useCartContext();
+  const addNotification              = useStore((state) => state.addNotification);
 
   const { product, isLoading, error, stockChanged, clearStockChanged } = useProductDetail({
     productSlug: slug,
@@ -109,72 +110,66 @@ export function ProductDetailPage() {
 
   const { products: relatedProducts, isLoading: loadingRelated } = useRelatedProducts(
     product?.category_id || null,
-    product?.id || null,
+    product?.id        || null,
     4
   );
 
-  const [quantity, setQuantity] = useState(1);
-  const [activeTab, setActiveTab] = useState<'description' | 'shipping'>('description');
-  const [isAdding, setIsAdding] = useState(false);
+  const [quantity,   setQuantity]   = useState(1);
+  const [activeTab,  setActiveTab]  = useState<'description' | 'shipping'>('description');
+  const [isAdding,   setIsAdding]   = useState(false);
 
-  if (stockChanged) {
-    setTimeout(clearStockChanged, 3000);
-  }
+  // ── Clear stock-changed flag after 3 s (effect, not render-time call) ──────
+  useEffect(() => {
+    if (!stockChanged) return;
+    const id = setTimeout(clearStockChanged, 3000);
+    return () => clearTimeout(id);
+  }, [stockChanged, clearStockChanged]);
 
-  const isOutOfStock = !product || product.quantity <= 0;
-  const maxQuantity = product?.quantity || 0;
-
-  const name = product ? (language === 'ar' ? product.name_ar : product.name_fr) : '';
-  const description = product
-    ? language === 'ar'
-      ? product.description_ar
-      : product.description_fr
+  // Derived values
+  const isOutOfStock  = !product || product.quantity <= 0;
+  const maxQuantity   = product?.quantity || 0;
+  const name          = product ? (language === 'ar' ? product.name_ar : product.name_fr) : '';
+  const description   = product
+    ? (language === 'ar' ? product.description_ar : product.description_fr)
     : '';
 
-  const handleQuantityChange = useCallback(
-    (delta: number) => {
-      setQuantity((prev) => {
-        const next = prev + delta;
-        if (next < 1) return 1;
-        if (next > maxQuantity) return maxQuantity;
-        return next;
-      });
-    },
-    [maxQuantity]
-  );
+  // ── Quantity controls ───────────────────────────────────────────────────────
+  const handleQuantityChange = useCallback((delta: number) => {
+    setQuantity((prev) => {
+      const next = prev + delta;
+      return Math.min(Math.max(1, next), maxQuantity);
+    });
+  }, [maxQuantity]);
 
-  // ── FIXED: handleAddToCart ─────────────────────────────────────────────────
+  // ── Add to cart ─────────────────────────────────────────────────────────────
   const handleAddToCart = useCallback(async () => {
     if (!product || isOutOfStock || isAdding) return;
 
     setIsAdding(true);
 
     try {
-      // CartContext.addToCart: validates stock, syncs Supabase / localStorage,
-      // and returns { success, error? } — same as ProductCard.
       const result = await addToCart(product.id, quantity);
 
       if (result.success) {
         addNotification({
           type: 'success',
-          title: language === 'ar' ? 'تمت إضافة المنتج' : 'Produit ajouté',
-          message: `${quantity}x ${name}`,
+          title: t.addedTitle[language],
+          message: `${quantity}× ${name}`,
           duration: 3000,
         });
 
-        // Open cart drawer after a short delay (lets user see the ✓ state first)
-        setTimeout(() => openCart(), 150);
-
-        // Reset quantity back to 1 after success
+        // Open cart drawer after a brief pause (user sees the ✓ first).
+        // Then immediately reset state so the button is usable again.
         setTimeout(() => {
+          openCart();
           setIsAdding(false);
           setQuantity(1);
-        }, 1500);
+        }, 150);
       } else {
         addNotification({
           type: 'error',
-          title: language === 'ar' ? 'خطأ' : 'Erreur',
-          message: result.error || (language === 'ar' ? 'فشل في الإضافة' : "Échec de l'ajout"),
+          title: t.errorTitle[language],
+          message: result.error || t.addFailed[language],
           duration: 3000,
         });
         setIsAdding(false);
@@ -183,8 +178,8 @@ export function ProductDetailPage() {
       console.error('Add to cart error:', err);
       addNotification({
         type: 'error',
-        title: language === 'ar' ? 'خطأ' : 'Erreur',
-        message: language === 'ar' ? 'فشل في الإضافة' : "Échec de l'ajout",
+        title: t.errorTitle[language],
+        message: t.addFailed[language],
         duration: 3000,
       });
       setIsAdding(false);
@@ -192,32 +187,38 @@ export function ProductDetailPage() {
   }, [product, quantity, isOutOfStock, isAdding, addToCart, openCart, addNotification, language, name]);
 
   // ============================================================================
-  // RENDER STATES
+  // LOADING STATE
   // ============================================================================
 
   if (isLoading) {
     return (
-      <div className={cn('min-h-screen bg-gradient-to-br from-slate-50 via-white to-red-50', isRTL ? 'font-[Cairo]' : 'font-[Inter]')}>
-        <PageHeader language={language} isRTL={isRTL} />
+      <CustomerLayout>
         <main className="max-w-7xl mx-auto px-4 py-8">
           <div className="grid lg:grid-cols-2 gap-12">
+            {/* Image skeleton */}
             <div className="aspect-square bg-slate-200 rounded-2xl animate-pulse" />
-            <div className="space-y-4">
+            {/* Info skeleton */}
+            <div className="space-y-4 pt-2">
+              <div className="h-4 bg-slate-200 rounded w-1/4 animate-pulse" />
               <div className="h-8 bg-slate-200 rounded w-3/4 animate-pulse" />
-              <div className="h-6 bg-slate-200 rounded w-1/2 animate-pulse" />
-              <div className="h-10 bg-slate-200 rounded w-1/3 animate-pulse" />
+              <div className="h-6 bg-slate-200 rounded w-1/3 animate-pulse" />
+              <div className="h-10 bg-slate-200 rounded w-2/5 animate-pulse" />
               <div className="h-32 bg-slate-200 rounded animate-pulse" />
+              <div className="h-12 bg-slate-200 rounded animate-pulse" />
             </div>
           </div>
         </main>
-      </div>
+      </CustomerLayout>
     );
   }
 
+  // ============================================================================
+  // ERROR / NOT FOUND STATE
+  // ============================================================================
+
   if (error || !product) {
     return (
-      <div className={cn('min-h-screen bg-gradient-to-br from-slate-50 via-white to-red-50', isRTL ? 'font-[Cairo]' : 'font-[Inter]')}>
-        <PageHeader language={language} isRTL={isRTL} />
+      <CustomerLayout>
         <main className="max-w-7xl mx-auto px-4 py-16">
           <div className="text-center">
             <div className="w-24 h-24 mx-auto mb-6 bg-red-100 rounded-full flex items-center justify-center">
@@ -230,7 +231,7 @@ export function ProductDetailPage() {
             <Button onClick={() => navigate('/products')}>{t.backToProducts[language]}</Button>
           </div>
         </main>
-      </div>
+      </CustomerLayout>
     );
   }
 
@@ -239,44 +240,47 @@ export function ProductDetailPage() {
   // ============================================================================
 
   return (
-    <div className={cn('min-h-screen bg-gradient-to-br from-slate-50 via-white to-red-50', isRTL ? 'font-[Cairo]' : 'font-[Inter]')}>
-      <PageHeader language={language} isRTL={isRTL} />
-
+    <CustomerLayout>
       <main className="max-w-7xl mx-auto px-4 py-8">
+
         {/* Breadcrumb */}
-        <nav className="flex items-center gap-2 text-sm text-slate-500 mb-6">
-          <Link to="/" className="hover:text-red-600 transition-colors">{t.home[language]}</Link>
-          <span className="rtl:rotate-180">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-            </svg>
-          </span>
-          <Link to="/products" className="hover:text-red-600 transition-colors">{t.products[language]}</Link>
-          <span className="rtl:rotate-180">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-            </svg>
-          </span>
-          <span className="text-slate-900 font-medium truncate">{name}</span>
+        <nav
+          className="flex items-center gap-2 text-sm text-slate-500 mb-6"
+          aria-label="breadcrumb"
+        >
+          <Link to="/" className="hover:text-red-600 transition-colors">
+            {t.home[language]}
+          </Link>
+          <ChevronIcon isRTL={isRTL} />
+          <Link to="/products" className="hover:text-red-600 transition-colors">
+            {t.products[language]}
+          </Link>
+          <ChevronIcon isRTL={isRTL} />
+          <span className="text-slate-900 font-medium truncate max-w-[200px]">{name}</span>
         </nav>
 
-        {/* Stock Update Alert */}
+        {/* Real-time stock alert */}
         {stockChanged && (
-          <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-lg flex items-center gap-3">
+          <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-xl flex items-center gap-3">
             <svg className="w-5 h-5 text-amber-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
-            <p className="text-amber-800">
+            <p className="text-amber-800 text-sm font-medium">
               {t.stockUpdated[language]}: {product.quantity} {t.available[language]}
             </p>
           </div>
         )}
 
-        {/* Product Content */}
+        {/* ── Product content ─────────────────────────────────────────────── */}
         <div className="grid lg:grid-cols-2 gap-12">
+
+          {/* Left: Gallery */}
           <ImageGallery images={product.images} productName={name} />
 
-          <div className="space-y-6">
+          {/* Right: Details */}
+          <div className="space-y-5">
+
+            {/* Category link */}
             {product.category && (
               <Link
                 to={`/products/${product.category.slug}`}
@@ -286,8 +290,10 @@ export function ProductDetailPage() {
               </Link>
             )}
 
-            <h1 className="text-3xl font-bold text-slate-900">{name}</h1>
+            {/* Name */}
+            <h1 className="text-3xl font-bold text-slate-900 leading-tight">{name}</h1>
 
+            {/* Stock badge */}
             <StockBadge
               quantity={product.quantity}
               lowStockThreshold={product.low_stock_threshold || 10}
@@ -296,65 +302,79 @@ export function ProductDetailPage() {
             />
 
             {/* Price */}
-            <div className="mb-6">
-              <ProductPriceLarge
-                price={product.price}
-                wholesalePrice={product.wholesale_price ?? undefined}
-                compareAtPrice={product.compare_at_price ?? undefined}
-              />
-            </div>
+            <ProductPriceLarge
+              price={product.price}
+              wholesalePrice={product.wholesale_price ?? undefined}
+              compareAtPrice={product.compare_at_price ?? undefined}
+            />
 
             {/* Volume discounts */}
             <VolumeDiscounts
               productId={product.id}
               basePrice={product.wholesale_price ?? product.price}
-              className="mb-6"
             />
 
             {/* Wholesale notices */}
             {isPendingWholesale && product.wholesale_price && (
-              <p className="text-sm text-amber-600 flex items-center gap-2 mb-4">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                <svg className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
-                {t.wholesalePending[language]}
-              </p>
+                <p className="text-sm text-amber-700">{t.wholesalePending[language]}</p>
+              </div>
             )}
 
             {isWholesale && product.wholesale_min_quantity > 1 && (
-              <p className="text-sm text-slate-600 mb-6">
-                {t.minWholesale[language]}: {product.wholesale_min_quantity}
+              <p className="text-sm text-slate-600">
+                <span className="font-medium">{t.minWholesale[language]}:</span>{' '}
+                {product.wholesale_min_quantity}
               </p>
             )}
 
-            {/* Quantity selector + Add to Cart */}
-            <div className="flex items-center gap-4">
-              <div className="flex items-center border border-slate-300 rounded-lg">
+            {/* ── Quantity + Add-to-cart ──────────────────────────────────── */}
+            <div className="flex items-center gap-3 pt-2">
+              {/* Stepper */}
+              <div className="flex items-center border border-slate-300 rounded-xl overflow-hidden">
                 <button
+                  type="button"
                   onClick={() => handleQuantityChange(-1)}
                   disabled={quantity <= 1 || isOutOfStock}
-                  className="p-3 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  aria-label="Decrease quantity"
+                  className={cn(
+                    'px-3 py-3 transition-colors',
+                    'hover:bg-slate-100 active:bg-slate-200',
+                    'disabled:opacity-40 disabled:cursor-not-allowed'
+                  )}
                 >
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
                   </svg>
                 </button>
+
                 <input
                   type="number"
                   value={quantity}
                   onChange={(e) => {
-                    const val = parseInt(e.target.value) || 1;
+                    const val = parseInt(e.target.value, 10) || 1;
                     setQuantity(Math.min(Math.max(1, val), maxQuantity));
                   }}
                   min={1}
                   max={maxQuantity}
                   disabled={isOutOfStock}
-                  className="w-16 text-center border-0 focus:ring-0 text-lg font-medium"
+                  aria-label="Quantity"
+                  className="w-14 text-center text-lg font-semibold bg-transparent border-0 focus:ring-0 focus:outline-none"
                 />
+
                 <button
+                  type="button"
                   onClick={() => handleQuantityChange(1)}
                   disabled={quantity >= maxQuantity || isOutOfStock}
-                  className="p-3 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  aria-label="Increase quantity"
+                  className={cn(
+                    'px-3 py-3 transition-colors',
+                    'hover:bg-slate-100 active:bg-slate-200',
+                    'disabled:opacity-40 disabled:cursor-not-allowed'
+                  )}
                 >
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -362,10 +382,10 @@ export function ProductDetailPage() {
                 </button>
               </div>
 
+              {/* CTA */}
               <Button
                 onClick={handleAddToCart}
-                disabled={isOutOfStock}
-                isLoading={isAdding}
+                disabled={isOutOfStock || isAdding}
                 size="lg"
                 className="flex-1"
                 leftIcon={
@@ -388,83 +408,82 @@ export function ProductDetailPage() {
               </Button>
             </div>
 
-            {/* Meta info */}
-            <div className="flex flex-wrap gap-4 text-sm text-slate-600 pt-4 border-t">
-              {product.sku && (
-                <p>
-                  <span className="font-medium">{t.sku[language]}:</span> {product.sku}
-                </p>
-              )}
-              {product.brand && (
-                <p>
-                  <span className="font-medium">{t.brand[language]}:</span> {product.brand}
-                </p>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Tabs */}
-        <div className="mt-12">
-          <div className="flex border-b border-slate-200">
-            <button
-              onClick={() => setActiveTab('description')}
-              className={cn(
-                'px-6 py-3 text-sm font-medium border-b-2 -mb-px transition-colors',
-                activeTab === 'description'
-                  ? 'border-red-600 text-red-600'
-                  : 'border-transparent text-slate-500 hover:text-slate-700'
-              )}
-            >
-              {t.description[language]}
-            </button>
-            <button
-              onClick={() => setActiveTab('shipping')}
-              className={cn(
-                'px-6 py-3 text-sm font-medium border-b-2 -mb-px transition-colors',
-                activeTab === 'shipping'
-                  ? 'border-red-600 text-red-600'
-                  : 'border-transparent text-slate-500 hover:text-slate-700'
-              )}
-            >
-              {t.shipping[language]}
-            </button>
-          </div>
-
-          <div className="py-6">
-            {activeTab === 'description' && (
-              <div className="prose max-w-none">
-                {description ? (
-                  <p className="text-slate-700 whitespace-pre-wrap">{description}</p>
-                ) : (
-                  <p className="text-slate-500 italic">
-                    {language === 'ar' ? 'لا يوجد وصف متاح' : 'Aucune description disponible'}
+            {/* Meta: SKU / Brand */}
+            {(product.sku || product.brand) && (
+              <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm text-slate-500 pt-3 border-t border-slate-100">
+                {product.sku && (
+                  <p>
+                    <span className="font-medium text-slate-700">{t.sku[language]}:</span>{' '}
+                    {product.sku}
+                  </p>
+                )}
+                {product.brand && (
+                  <p>
+                    <span className="font-medium text-slate-700">{t.brand[language]}:</span>{' '}
+                    {product.brand}
                   </p>
                 )}
               </div>
             )}
-
-            {activeTab === 'shipping' && (
-              <div className="space-y-4">
-                <p className="text-slate-700">{t.shippingText[language]}</p>
-                <div className="grid sm:grid-cols-2 gap-4 mt-4">
-                  <div className="p-4 bg-slate-50 rounded-lg">
-                    <p className="font-medium text-slate-900">{t.grandTunis[language]}</p>
-                    <p className="text-lg font-bold text-red-600">5.000 TND</p>
-                  </div>
-                  <div className="p-4 bg-slate-50 rounded-lg">
-                    <p className="font-medium text-slate-900">{t.otherRegions[language]}</p>
-                    <p className="text-lg font-bold text-red-600">7.000 - 10.000 TND</p>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
         </div>
 
-        {/* Related Products */}
-        {relatedProducts.length > 0 && (
-          <div className="mt-12">
+        {/* ── Description / Shipping tabs ─────────────────────────────────── */}
+        <div className="mt-14 border-t border-slate-200 pt-8">
+          {/* Tab list */}
+          <div className="flex border-b border-slate-200 mb-6" role="tablist">
+            {(['description', 'shipping'] as const).map((tab) => (
+              <button
+                key={tab}
+                role="tab"
+                aria-selected={activeTab === tab}
+                onClick={() => setActiveTab(tab)}
+                className={cn(
+                  'px-6 py-3 text-sm font-medium border-b-2 -mb-px transition-colors',
+                  activeTab === tab
+                    ? 'border-red-600 text-red-600'
+                    : 'border-transparent text-slate-500 hover:text-slate-700'
+                )}
+              >
+                {t[tab][language]}
+              </button>
+            ))}
+          </div>
+
+          {/* Description */}
+          {activeTab === 'description' && (
+            <div className="prose prose-slate max-w-none">
+              {description ? (
+                <p className="text-slate-700 whitespace-pre-wrap leading-relaxed">{description}</p>
+              ) : (
+                <p className="text-slate-400 italic">
+                  {language === 'ar' ? 'لا يوجد وصف متاح' : 'Aucune description disponible'}
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Shipping */}
+          {activeTab === 'shipping' && (
+            <div className="space-y-4">
+              <p className="text-slate-700">{t.shippingText[language]}</p>
+              <div className="grid sm:grid-cols-2 gap-4">
+                <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
+                  <p className="font-medium text-slate-900 mb-1">{t.grandTunis[language]}</p>
+                  <p className="text-xl font-bold text-red-600">5.000 TND</p>
+                </div>
+                <div className="p-4 bg-slate-50 rounded-xl border border-slate-200">
+                  <p className="font-medium text-slate-900 mb-1">{t.otherRegions[language]}</p>
+                  <p className="text-xl font-bold text-red-600">7.000 – 10.000 TND</p>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ── Related products ─────────────────────────────────────────────── */}
+        {(loadingRelated || relatedProducts.length > 0) && (
+          <div className="mt-14">
             <h2 className="text-2xl font-bold text-slate-900 mb-6">
               {t.relatedProducts[language]}
             </h2>
@@ -477,57 +496,39 @@ export function ProductDetailPage() {
         )}
       </main>
 
-      <footer className="bg-white border-t border-slate-200 mt-12">
-        <div className="max-w-7xl mx-auto px-4 py-8 text-center text-slate-500 text-sm">
-          <p>
-            {language === 'ar'
-              ? '© 2024 غالينينو. جميع الحقوق محفوظة.'
-              : '© 2024 Ghalinino. Tous droits réservés.'}
-          </p>
-        </div>
-      </footer>
-    </div>
+      {/* Footer */}
+      <PageFooter language={language} />
+    </CustomerLayout>
   );
 }
 
 // ============================================================================
-// PAGE HEADER — now includes CartBadge
+// SUB-COMPONENTS
 // ============================================================================
 
-function PageHeader({ language, isRTL }: { language: 'ar' | 'fr'; isRTL: boolean }) {
+function ChevronIcon({ isRTL }: { isRTL: boolean }) {
   return (
-    <header
-      className={cn(
-        'bg-white border-b border-slate-200 sticky top-0 z-40',
-        isRTL ? 'font-[Cairo]' : 'font-[Inter]'
-      )}
+    <svg
+      className={cn('w-4 h-4 text-slate-400 shrink-0', isRTL && 'rotate-180')}
+      fill="none"
+      stroke="currentColor"
+      viewBox="0 0 24 24"
     >
-      <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
-        <Link to="/" className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-gradient-to-br from-red-600 to-red-700 rounded-xl flex items-center justify-center shadow-lg shadow-red-200">
-            <span className="text-white font-bold text-lg">غ</span>
-          </div>
-          <div className="hidden sm:block">
-            <h1 className="font-bold text-slate-900 text-lg">
-              {language === 'ar' ? 'غالينينو' : 'Ghalinino'}
-            </h1>
-          </div>
-        </Link>
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+    </svg>
+  );
+}
 
-        <nav className="flex items-center gap-4">
-          <Link
-            to="/products"
-            className="text-slate-600 hover:text-red-600 transition-colors text-sm font-medium"
-          >
-            {language === 'ar' ? 'المنتجات' : 'Produits'}
-          </Link>
-
-          {/* CartBadge opens the global CartDrawer mounted in App.tsx */}
-          <CartBadge />
-
-          <LanguageToggle />
-        </nav>
+function PageFooter({ language }: { language: 'ar' | 'fr' }) {
+  return (
+    <footer className="bg-white border-t border-slate-200 mt-12">
+      <div className="max-w-7xl mx-auto px-4 py-8 text-center text-slate-500 text-sm">
+        <p>
+          {language === 'ar'
+            ? '© 2024 غالينينو. جميع الحقوق محفوظة.'
+            : '© 2024 Ghalinino. Tous droits réservés.'}
+        </p>
       </div>
-    </header>
+    </footer>
   );
 }

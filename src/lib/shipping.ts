@@ -32,9 +32,9 @@ export interface ShippingOptions {
 // ============================================
 
 export const SHIPPING_CONFIG = {
-  RETAIL_BASE_SHIPPING: 7000, // 7 TND in millimes
-  WHOLESALE_BASE_SHIPPING: 5000, // 5 TND in millimes
-  WHOLESALE_DISCOUNT: 2000, // 2 TND discount for wholesale
+  RETAIL_BASE_SHIPPING: 7,    // 7 TND
+  WHOLESALE_BASE_SHIPPING: 5, // 5 TND
+  WHOLESALE_DISCOUNT: 2,      // 2 TND discount for wholesale
   FREE_SHIPPING_THRESHOLD: WHOLESALE_CONFIG.FREE_SHIPPING_THRESHOLD,
 } as const;
 
@@ -160,7 +160,7 @@ export function getShippingMessage(
   }
 
   if (calculation.wholesaleDiscount > 0 && !calculation.isFree) {
-    const saved = calculation.wholesaleDiscount / 1000;
+    const saved = calculation.wholesaleDiscount;
     return language === 'ar'
       ? `توفير ${saved.toFixed(3)} د.ت على الشحن`
       : `Économie de ${saved.toFixed(3)} TND sur la livraison`;

@@ -54,7 +54,7 @@ export function AdminDashboard() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <MetricCard 
           title="Total Revenue" 
-          value={formatPrice(totalRevenue * 1000, 'fr')} 
+          value={formatPrice(totalRevenue, 'fr')} 
           icon="💰"
           trend="+12%"
           trendUp={true}
