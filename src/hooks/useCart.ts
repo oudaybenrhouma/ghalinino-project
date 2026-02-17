@@ -1,0 +1,580 @@
+/**
+ * useCart Hook
+ * Ghalinino - Tunisia E-commerce
+ * 
+ * Hybrid cart system that uses:
+ * - localStorage for guest users
+ * - Supabase for authenticated users
+ * 
+ * Features:
+ * - Automatic sync between localStorage and Supabase
+ * - Real-time updates for authenticated users
+ * - Stock validation before adding
+ * - Guest cart migration on login
+ */
+
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { supabase } from '@/lib/supabase';
+import { useAuthContext } from '@/contexts/AuthContext';
+import { useStore } from '@/store';
+import {
+  getGuestCartItems,
+  addToGuestCartStorage,
+  updateGuestCartItemQuantity,
+  removeFromGuestCartStorage,
+  clearGuestCartStorage,
+} from '@/lib/cartStorage';
+import type { Product } from '@/types/database';
+
+// ============================================================================
+// TYPES
+// ============================================================================
+
+export interface CartItemWithProduct {
+  id: string;
+  productId: string;
+  quantity: number;
+  product: {
+    id: string;
+    nameAr: string;
+    nameFr: string;
+    slug: string;
+    price: number;
+    wholesalePrice: number | null;
+    compareAtPrice: number | null;
+    images: string[];
+    quantity: number; // available stock
+    isActive: boolean;
+    wholesaleMinQuantity: number;
+  };
+}
+
+export interface CartSummary {
+  items: CartItemWithProduct[];
+  itemCount: number;
+  subtotal: number;
+  isWholesaleCart: boolean;
+}
+
+export interface UseCartReturn {
+  // State
+  items: CartItemWithProduct[];
+  isLoading: boolean;
+  error: string | null;
+  
+  // Computed
+  itemCount: number;
+  subtotal: number;
+  isEmpty: boolean;
+  
+  // Actions
+  addToCart: (productId: string, quantity?: number) => Promise<{ success: boolean; error?: string }>;
+  updateQuantity: (productId: string, quantity: number) => Promise<{ success: boolean; error?: string }>;
+  removeFromCart: (productId: string) => Promise<{ success: boolean }>;
+  clearCart: () => Promise<{ success: boolean }>;
+  refreshCart: () => Promise<void>;
+  
+  // Stock validation
+  validateStock: (productId: string, quantity: number) => Promise<{ valid: boolean; availableStock: number }>;
+}
+
+// ============================================================================
+// HOOK
+// ============================================================================
+
+export function useCart(): UseCartReturn {
+  const { user, isAuthenticated } = useAuthContext();
+  const addNotification = useStore((state) => state.addNotification);
+  
+  const [items, setItems] = useState<CartItemWithProduct[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  
+  // Track user's cart ID in Supabase
+  const cartIdRef = useRef<string | null>(null);
+
+  // Computed values
+  const itemCount = items.reduce((sum, item) => sum + item.quantity, 0);
+  const subtotal = items.reduce((sum, item) => sum + (item.product.price * item.quantity), 0);
+  const isEmpty = items.length === 0;
+
+  // =========================================================================
+  // FETCH PRODUCT DETAILS
+  // =========================================================================
+
+  const fetchProductDetails = useCallback(async (
+    productIds: string[]
+  ): Promise<Map<string, Product>> => {
+    if (productIds.length === 0) return new Map();
+
+    try {
+      const { data, error: queryError } = await supabase
+        .from('products')
+        .select('*')
+        .in('id', productIds)
+        .eq('is_active', true);
+
+      if (queryError) throw queryError;
+
+      const productMap = new Map<string, Product>();
+      const products = data as unknown as Product[] | null;
+      (products || []).forEach((product) => {
+        productMap.set(product.id, product);
+      });
+
+      return productMap;
+    } catch (err) {
+      console.error('Error fetching product details:', err);
+      return new Map();
+    }
+  }, []);
+
+  // =========================================================================
+  // CONVERT PRODUCT TO CART ITEM
+  // =========================================================================
+
+  const productToCartItem = useCallback((
+    product: Product,
+    quantity: number,
+    itemId?: string
+  ): CartItemWithProduct => ({
+    id: itemId || `local-${product.id}`,
+    productId: product.id,
+    quantity,
+    product: {
+      id: product.id,
+      nameAr: product.name_ar,
+      nameFr: product.name_fr,
+      slug: product.slug,
+      price: product.price,
+      wholesalePrice: product.wholesale_price,
+      compareAtPrice: product.compare_at_price,
+      images: product.images,
+      quantity: product.quantity,
+      isActive: product.is_active,
+      wholesaleMinQuantity: product.wholesale_min_quantity,
+    },
+  }), []);
+
+  // =========================================================================
+  // LOAD GUEST CART
+  // =========================================================================
+
+  const loadGuestCart = useCallback(async (): Promise<CartItemWithProduct[]> => {
+    const guestItems = getGuestCartItems();
+    
+    if (guestItems.length === 0) {
+      return [];
+    }
+
+    const productIds = guestItems.map(item => item.productId);
+    const productMap = await fetchProductDetails(productIds);
+
+    const cartItems: CartItemWithProduct[] = [];
+    
+    for (const guestItem of guestItems) {
+      const product = productMap.get(guestItem.productId);
+      if (product) {
+        // Ensure quantity doesn't exceed stock
+        const quantity = Math.min(guestItem.quantity, product.quantity);
+        if (quantity > 0) {
+          cartItems.push(productToCartItem(product, quantity));
+        }
+      }
+    }
+
+    return cartItems;
+  }, [fetchProductDetails, productToCartItem]);
+
+  // =========================================================================
+  // LOAD SUPABASE CART
+  // =========================================================================
+
+  const loadSupabaseCart = useCallback(async (): Promise<CartItemWithProduct[]> => {
+    if (!user) return [];
+
+    try {
+      // Get or create user's cart
+      const { data: existingCart } = await supabase
+        .from('carts')
+        .select('id')
+        .eq('user_id', user.id)
+        .single();
+
+      let cartId: string;
+
+      if (!existingCart) {
+        // Create new cart
+        const { data: newCart, error: createError } = await supabase
+          .from('carts')
+          .insert({ user_id: user.id } as never)
+          .select('id')
+          .single();
+
+        if (createError) throw createError;
+        const newCartData = newCart as unknown as { id: string } | null;
+        if (!newCartData) throw new Error('Failed to create cart');
+        cartId = newCartData.id;
+      } else {
+        const existingCartData = existingCart as unknown as { id: string };
+        cartId = existingCartData.id;
+      }
+
+      cartIdRef.current = cartId;
+
+      // Fetch cart items with product details
+      const { data: itemsData, error: itemsError } = await supabase
+        .from('cart_items')
+        .select(`
+          id,
+          product_id,
+          quantity,
+          products:product_id (
+            id,
+            name_ar,
+            name_fr,
+            slug,
+            price,
+            wholesale_price,
+            compare_at_price,
+            images,
+            quantity,
+            is_active,
+            wholesale_min_quantity
+          )
+        `)
+        .eq('cart_id', cartId);
+
+      if (itemsError) throw itemsError;
+
+      const cartItems: CartItemWithProduct[] = [];
+
+      interface CartItemRow {
+        id: string;
+        product_id: string;
+        quantity: number;
+        products: Product | null;
+      }
+
+      const typedItems = (itemsData || []) as unknown as CartItemRow[];
+
+      for (const item of typedItems) {
+        const product = item.products;
+        if (product && product.is_active) {
+          // Ensure quantity doesn't exceed stock
+          const quantity = Math.min(item.quantity, product.quantity);
+          if (quantity > 0) {
+            cartItems.push(productToCartItem(product, quantity, item.id));
+            
+            // Update if quantity was adjusted
+            if (quantity !== item.quantity) {
+              await supabase
+                .from('cart_items')
+                .update({ quantity } as never)
+                .eq('id', item.id);
+            }
+          } else {
+            // Remove out of stock item
+            await supabase
+              .from('cart_items')
+              .delete()
+              .eq('id', item.id);
+          }
+        }
+      }
+
+      return cartItems;
+    } catch (err) {
+      console.error('Error loading Supabase cart:', err);
+      return [];
+    }
+  }, [user, productToCartItem]);
+
+  // =========================================================================
+  // LOAD CART (MAIN)
+  // =========================================================================
+
+  const loadCart = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      let cartItems: CartItemWithProduct[];
+
+      if (isAuthenticated && user) {
+        cartItems = await loadSupabaseCart();
+      } else {
+        cartItems = await loadGuestCart();
+      }
+
+      setItems(cartItems);
+    } catch (err) {
+      console.error('Error loading cart:', err);
+      setError(err instanceof Error ? err.message : 'Failed to load cart');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [isAuthenticated, user, loadSupabaseCart, loadGuestCart]);
+
+  // =========================================================================
+  // VALIDATE STOCK
+  // =========================================================================
+
+  const validateStock = useCallback(async (
+    productId: string,
+    quantity: number
+  ): Promise<{ valid: boolean; availableStock: number }> => {
+    try {
+      const { data, error: queryError } = await supabase
+        .from('products')
+        .select('quantity, is_active')
+        .eq('id', productId)
+        .single();
+
+      if (queryError || !data) {
+        return { valid: false, availableStock: 0 };
+      }
+
+      const product = data as { quantity: number; is_active: boolean };
+
+      if (!product.is_active) {
+        return { valid: false, availableStock: 0 };
+      }
+
+      return {
+        valid: quantity <= product.quantity,
+        availableStock: product.quantity,
+      };
+    } catch {
+      return { valid: false, availableStock: 0 };
+    }
+  }, []);
+
+  // =========================================================================
+  // ADD TO CART
+  // =========================================================================
+
+  const addToCart = useCallback(async (
+    productId: string,
+    quantity: number = 1
+  ): Promise<{ success: boolean; error?: string }> => {
+    try {
+      // First validate stock
+      const { valid, availableStock } = await validateStock(productId, quantity);
+      
+      if (!valid && availableStock === 0) {
+        return { success: false, error: 'Product is not available' };
+      }
+
+      // Get current quantity in cart
+      const existingItem = items.find(item => item.productId === productId);
+      const currentQuantity = existingItem?.quantity || 0;
+      const newTotalQuantity = currentQuantity + quantity;
+
+      if (newTotalQuantity > availableStock) {
+        return { 
+          success: false, 
+          error: `Only ${availableStock} available (${currentQuantity} already in cart)` 
+        };
+      }
+
+      if (isAuthenticated && user && cartIdRef.current) {
+        // Supabase cart
+        if (existingItem) {
+          // Update existing item
+          await supabase
+            .from('cart_items')
+            .update({ quantity: newTotalQuantity } as never)
+            .eq('cart_id', cartIdRef.current)
+            .eq('product_id', productId);
+        } else {
+          // Insert new item
+          await supabase
+            .from('cart_items')
+            .insert({
+              cart_id: cartIdRef.current,
+              product_id: productId,
+              quantity,
+            } as never);
+        }
+      } else {
+        // Guest cart (localStorage)
+        addToGuestCartStorage(productId, quantity, availableStock);
+      }
+
+      // Refresh cart
+      await loadCart();
+
+      return { success: true };
+    } catch (err) {
+      console.error('Error adding to cart:', err);
+      return { success: false, error: 'Failed to add item to cart' };
+    }
+  }, [items, isAuthenticated, user, validateStock, loadCart]);
+
+  // =========================================================================
+  // UPDATE QUANTITY
+  // =========================================================================
+
+  const updateQuantity = useCallback(async (
+    productId: string,
+    quantity: number
+  ): Promise<{ success: boolean; error?: string }> => {
+    try {
+      if (quantity < 1) {
+        return removeFromCart(productId).then(() => ({ success: true }));
+      }
+
+      // Validate stock
+      const { valid, availableStock } = await validateStock(productId, quantity);
+      
+      if (!valid) {
+        const adjustedQuantity = Math.min(quantity, availableStock);
+        if (adjustedQuantity === 0) {
+          return { success: false, error: 'Product is out of stock' };
+        }
+        
+        // Use adjusted quantity
+        quantity = adjustedQuantity;
+        
+        addNotification({
+          type: 'warning',
+          title: 'Quantité ajustée',
+          message: `Seulement ${availableStock} disponibles`,
+          duration: 3000,
+        });
+      }
+
+      if (isAuthenticated && user && cartIdRef.current) {
+        // Supabase cart
+        await supabase
+          .from('cart_items')
+          .update({ quantity } as never)
+          .eq('cart_id', cartIdRef.current)
+          .eq('product_id', productId);
+      } else {
+        // Guest cart
+        updateGuestCartItemQuantity(productId, quantity, availableStock);
+      }
+
+      // Refresh cart
+      await loadCart();
+
+      return { success: true };
+    } catch (err) {
+      console.error('Error updating quantity:', err);
+      return { success: false, error: 'Failed to update quantity' };
+    }
+  }, [isAuthenticated, user, validateStock, loadCart, addNotification]);
+
+  // =========================================================================
+  // REMOVE FROM CART
+  // =========================================================================
+
+  const removeFromCart = useCallback(async (
+    productId: string
+  ): Promise<{ success: boolean }> => {
+    try {
+      if (isAuthenticated && user && cartIdRef.current) {
+        // Supabase cart
+        await supabase
+          .from('cart_items')
+          .delete()
+          .eq('cart_id', cartIdRef.current)
+          .eq('product_id', productId);
+      } else {
+        // Guest cart
+        removeFromGuestCartStorage(productId);
+      }
+
+      // Update local state immediately
+      setItems(prev => prev.filter(item => item.productId !== productId));
+
+      return { success: true };
+    } catch (err) {
+      console.error('Error removing from cart:', err);
+      return { success: false };
+    }
+  }, [isAuthenticated, user]);
+
+  // =========================================================================
+  // CLEAR CART
+  // =========================================================================
+
+  const clearCart = useCallback(async (): Promise<{ success: boolean }> => {
+    try {
+      if (isAuthenticated && user && cartIdRef.current) {
+        // Supabase cart
+        await supabase
+          .from('cart_items')
+          .delete()
+          .eq('cart_id', cartIdRef.current);
+      } else {
+        // Guest cart
+        clearGuestCartStorage();
+      }
+
+      setItems([]);
+      return { success: true };
+    } catch (err) {
+      console.error('Error clearing cart:', err);
+      return { success: false };
+    }
+  }, [isAuthenticated, user]);
+
+  // =========================================================================
+  // EFFECTS
+  // =========================================================================
+
+  // Load cart on mount and auth change
+  useEffect(() => {
+    loadCart();
+  }, [loadCart]);
+
+  // Subscribe to real-time cart updates (for authenticated users)
+  useEffect(() => {
+    if (!isAuthenticated || !cartIdRef.current) return;
+
+    const cartId = cartIdRef.current;
+
+    const channel = supabase
+      .channel(`cart-${cartId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'cart_items',
+          filter: `cart_id=eq.${cartId}`,
+        },
+        () => {
+          // Reload cart on any change
+          loadCart();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [isAuthenticated, loadCart]);
+
+  // =========================================================================
+  // RETURN
+  // =========================================================================
+
+  return {
+    items,
+    isLoading,
+    error,
+    itemCount,
+    subtotal,
+    isEmpty,
+    addToCart,
+    updateQuantity,
+    removeFromCart,
+    clearCart,
+    refreshCart: loadCart,
+    validateStock,
+  };
+}
