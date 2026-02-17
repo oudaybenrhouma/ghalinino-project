@@ -105,7 +105,7 @@ export function OrderHistoryPage() {
                       {language === 'ar' ? 'المجموع' : 'Total'}
                     </p>
                     <p className="font-bold text-red-600">
-                      {formatPrice(order.total * 1000, language)}
+                      {formatPrice(order.total, language)}
                     </p>
                   </div>
                   

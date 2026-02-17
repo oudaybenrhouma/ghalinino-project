@@ -40,7 +40,7 @@
  *     always mounted and never replaced by the fallback.
  */
 
-import { lazy, Suspense, useEffect } from 'react';
+import { lazy, Suspense, useEffect, useState, useRef } from 'react';
 import { BrowserRouter, Routes, Route, Link, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuthContext } from '@/contexts/AuthContext';
 import { CartProvider } from '@/contexts/CartContext';
@@ -51,6 +51,8 @@ import { ToastNotifications } from '@/components/common/ToastNotifications';
 import { useLanguage } from '@/hooks';
 import { useStore } from '@/store';
 import { cn, formatPrice, GOVERNORATES, getShippingPrice } from '@/lib/utils';
+import { useProducts, useCategories } from '@/hooks/useProducts';
+import { ProductCard, ProductCardSkeleton } from '@/components/products/ProductCard';
 
 // ============================================================================
 // PAGE LOADER — shown by every Suspense boundary
@@ -181,13 +183,56 @@ const AdminCustomerDetail = lazy(() =>
 // HOMEPAGE  (eager — first paint)
 // ============================================================================
 
+// ── Animated counter hook ─────────────────────────────────────────────────────
+function useCountUp(target: number, duration = 1200, start = false) {
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    if (!start) return;
+    let raf: number;
+    const startTime = performance.now();
+    const tick = (now: number) => {
+      const elapsed = now - startTime;
+      const progress = Math.min(elapsed / duration, 1);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      setCount(Math.round(eased * target));
+      if (progress < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [target, duration, start]);
+  return count;
+}
+
 function HomePage() {
   const { language, isRTL } = useLanguage();
   const { user, isAuthenticated, isLoading, signOut, isPendingWholesale, isWholesale } =
     useAuthContext();
   const navigate = useNavigate();
 
-  // Sync document direction whenever language changes
+  const [statsVisible, setStatsVisible] = useState(false);
+  const statsRef = useRef<HTMLDivElement>(null);
+
+  const { products: featuredProducts, isLoading: productsLoading } = useProducts({
+    filters: { isFeatured: true },
+    sort: 'featured',
+    limit: 4,
+  });
+  const { categories } = useCategories();
+
+  // Intersection observer for stats counter animation
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      ([entry]) => { if (entry.isIntersecting) setStatsVisible(true); },
+      { threshold: 0.3 }
+    );
+    if (statsRef.current) observer.observe(statsRef.current);
+    return () => observer.disconnect();
+  }, []);
+
+  const statOrders = useCountUp(12400, 1400, statsVisible);
+  const statGovernates = useCountUp(24, 900, statsVisible);
+  const statSavings = useCountUp(28, 800, statsVisible);
+
   useEffect(() => {
     document.documentElement.dir  = isRTL ? 'rtl' : 'ltr';
     document.documentElement.lang = language;
@@ -200,256 +245,632 @@ function HomePage() {
     navigate('/');
   };
 
+  const shippingZones = [
+    { labelAr: 'تونس الكبرى', labelFr: 'Grand Tunis', price: 5, color: 'bg-red-50 border-red-200 text-red-700' },
+    { labelAr: 'الشمال', labelFr: 'Nord', price: 7, color: 'bg-orange-50 border-orange-200 text-orange-700' },
+    { labelAr: 'الوسط', labelFr: 'Centre', price: 8, color: 'bg-amber-50 border-amber-200 text-amber-700' },
+    { labelAr: 'الجنوب', labelFr: 'Sud', price: 10, color: 'bg-yellow-50 border-yellow-200 text-yellow-700' },
+  ];
+
+  const trustFeatures = [
+    {
+      iconPath: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z',
+      titleAr: 'دفع آمن ومضمون',
+      titleFr: 'Paiement sécurisé',
+      descAr: 'فلوسي، تحويل بنكي، أو الدفع عند الاستلام',
+      descFr: 'Flouci, virement bancaire ou paiement à la livraison',
+    },
+    {
+      iconPath: 'M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4',
+      titleAr: 'إرجاع مجاني',
+      titleFr: 'Retour gratuit',
+      descAr: '7 أيام لإعادة أي منتج بدون قيد أو شرط',
+      descFr: '7 jours pour retourner tout produit sans condition',
+    },
+    {
+      iconPath: 'M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z',
+      titleAr: 'أسعار الجملة',
+      titleFr: 'Prix grossiste',
+      descAr: 'وفر حتى 30% مع حساب التاجر بالجملة',
+      descFr: 'Économisez jusqu\'à 30% avec un compte grossiste',
+    },
+    {
+      iconPath: 'M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z M15 11a3 3 0 11-6 0 3 3 0 016 0z',
+      titleAr: 'توصيل لكل تونس',
+      titleFr: 'Livraison partout en Tunisie',
+      descAr: 'نوصل لجميع الولايات الـ 24 خلال 48 ساعة',
+      descFr: 'Livraison dans les 24 wilayas en 48h',
+    },
+  ];
+
   return (
     <div
       className={cn(
-        'min-h-screen bg-gradient-to-br from-slate-50 via-white to-red-50',
-        'font-sans',
+        'min-h-screen bg-white',
         isRTL ? 'font-[Cairo]' : 'font-[Inter]'
       )}
+      style={{ direction: isRTL ? 'rtl' : 'ltr' }}
     >
-      {/* ── Header ─────────────────────────────────────────────────────────── */}
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-50">
-        <div className="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
-          <Link to="/" className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-red-600 to-red-700 rounded-xl flex items-center justify-center shadow-lg shadow-red-200">
-              <span className="text-white font-bold text-lg">غ</span>
-            </div>
-            <div>
-              <h1 className="font-bold text-slate-900 text-lg">
-                {t('غالينينو', 'Ghalinino')}
-              </h1>
-              <p className="text-xs text-slate-500">
-                {t('متجرك المفضل', 'Votre boutique préférée')}
-              </p>
-            </div>
-          </Link>
-
-          <div className="flex items-center gap-4">
-            <CartBadge />
-            <LanguageToggle />
-
-            {isLoading ? (
-              <div className="w-20 h-10 bg-slate-100 rounded-lg animate-pulse" />
-            ) : isAuthenticated ? (
-              <div className="flex items-center gap-3">
-                <div className="text-end hidden sm:block">
-                  <p className="text-sm font-medium text-slate-900">
-                    {user?.fullName || user?.email}
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    {isPendingWholesale && (
-                      <span className="text-amber-600">
-                        {t('طلب قيد المراجعة', 'Demande en cours')}
-                      </span>
-                    )}
-                    {isWholesale && (
-                      <span className="text-green-600">
-                        {t('تاجر جملة', 'Grossiste')}
-                      </span>
-                    )}
-                    {!isPendingWholesale && !isWholesale && (
-                      <span>{t('عميل', 'Client')}</span>
-                    )}
-                  </p>
-                </div>
-                <Button variant="ghost" size="sm" onClick={handleSignOut}>
+      {/* ── HEADER ──────────────────────────────────────────────────────────── */}
+      <header
+        className="sticky top-0 z-50 border-b border-slate-100"
+        style={{ background: 'rgba(255,255,255,0.95)', backdropFilter: 'blur(12px)' }}
+      >
+        <div className="max-w-7xl mx-auto px-4 sm:px-6">
+          {/* Top utility bar */}
+          <div className="hidden md:flex items-center justify-between py-1.5 text-xs text-slate-500 border-b border-slate-100">
+            <span>{t('شحن مجاني للطلبات فوق 200 د.ت للجملة', 'Livraison gratuite dès 200 TND pour grossistes')}</span>
+            <div className="flex items-center gap-4">
+              <Link to="/account/orders" className="hover:text-red-600 transition-colors">
+                {t('طلباتي', 'Mes commandes')}
+              </Link>
+              <span className="text-slate-300">|</span>
+              {isAuthenticated ? (
+                <button onClick={handleSignOut} className="hover:text-red-600 transition-colors">
                   {t('خروج', 'Déconnexion')}
-                </Button>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2">
-                <Link to="/login">
-                  <Button variant="ghost" size="sm">
-                    {t('دخول', 'Connexion')}
-                  </Button>
+                </button>
+              ) : (
+                <Link to="/login" className="hover:text-red-600 transition-colors">
+                  {t('تسجيل الدخول', 'Connexion')}
                 </Link>
-                <Link to="/register">
-                  <Button size="sm">
-                    {t('تسجيل', 'Inscription')}
-                  </Button>
-                </Link>
+              )}
+            </div>
+          </div>
+
+          {/* Main nav */}
+          <div className="flex items-center justify-between py-3">
+            <Link to="/" className="flex items-center gap-3 group">
+              <div className="relative">
+                <div className="w-11 h-11 bg-red-600 rounded-xl flex items-center justify-center shadow-md shadow-red-200 group-hover:shadow-lg group-hover:shadow-red-300 transition-all">
+                  <span className="text-white font-black text-xl leading-none" style={{ fontFamily: 'Cairo, sans-serif' }}>غ</span>
+                </div>
               </div>
-            )}
+              <div className={isRTL ? 'text-right' : 'text-left'}>
+                <div className="font-black text-slate-900 text-xl tracking-tight leading-none">
+                  {t('غالينينو', 'Ghalinino')}
+                </div>
+                <div className="text-[10px] text-slate-400 font-medium tracking-widest uppercase mt-0.5">
+                  {t('متجرك في تونس', 'Tunisie E-commerce')}
+                </div>
+              </div>
+            </Link>
+
+            {/* Center nav links */}
+            <nav className="hidden lg:flex items-center gap-8">
+              <Link to="/products" className="text-sm font-medium text-slate-600 hover:text-red-600 transition-colors">
+                {t('المنتجات', 'Produits')}
+              </Link>
+              <Link to="/products/promotions" className="text-sm font-medium text-slate-600 hover:text-red-600 transition-colors">
+                {t('العروض', 'Promotions')}
+              </Link>
+              <Link to="/register/wholesale" className="text-sm font-medium text-slate-600 hover:text-red-600 transition-colors">
+                {t('بيع بالجملة', 'Vente en gros')}
+              </Link>
+            </nav>
+
+            <div className="flex items-center gap-2">
+              <LanguageToggle />
+              <CartBadge />
+
+              {isLoading ? (
+                <div className="w-8 h-8 bg-slate-100 rounded-lg animate-pulse" />
+              ) : isAuthenticated ? (
+                <div className="flex items-center gap-2">
+                  <Link to="/account/orders" className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-700 text-sm font-medium transition-colors">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                    </svg>
+                    <span>{user?.fullName?.split(' ')[0] || t('حسابي', 'Mon compte')}</span>
+                    {isWholesale && (
+                      <span className="w-2 h-2 bg-green-500 rounded-full" />
+                    )}
+                    {isPendingWholesale && (
+                      <span className="w-2 h-2 bg-amber-500 rounded-full animate-pulse" />
+                    )}
+                  </Link>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <Link to="/login">
+                    <Button variant="ghost" size="sm" className="hidden sm:inline-flex">
+                      {t('دخول', 'Connexion')}
+                    </Button>
+                  </Link>
+                  <Link to="/register">
+                    <Button size="sm" className="bg-red-600 hover:bg-red-700 text-white rounded-lg px-4">
+                      {t('تسجيل', 'S\'inscrire')}
+                    </Button>
+                  </Link>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </header>
 
-      {/* ── Main ───────────────────────────────────────────────────────────── */}
-      <main className="max-w-6xl mx-auto px-4 py-8">
-        {/* Hero */}
-        <div className="text-center mb-12">
-          <div className="inline-flex items-center gap-2 bg-green-100 text-green-700 px-4 py-2 rounded-full text-sm font-medium mb-4">
-            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-              <path
-                fillRule="evenodd"
-                d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                clipRule="evenodd"
-              />
+      <main>
+        {/* ── HERO ────────────────────────────────────────────────────────── */}
+        <section className="relative overflow-hidden bg-red-600" style={{ minHeight: '520px' }}>
+          {/* Geometric background pattern */}
+          <div className="absolute inset-0 overflow-hidden">
+            <div className="absolute -top-20 -right-20 w-96 h-96 rounded-full bg-red-500 opacity-40" />
+            <div className="absolute top-10 right-1/3 w-64 h-64 rounded-full bg-red-700 opacity-30" />
+            <div className="absolute -bottom-32 -left-16 w-80 h-80 rounded-full bg-red-800 opacity-25" />
+            <div className="absolute bottom-10 left-1/4 w-48 h-48 rounded-full bg-red-500 opacity-20" />
+            {/* Decorative Arabic pattern overlay */}
+            <svg className="absolute inset-0 w-full h-full opacity-5" viewBox="0 0 400 400" preserveAspectRatio="xMidYMid slice">
+              <defs>
+                <pattern id="hero-pattern" x="0" y="0" width="40" height="40" patternUnits="userSpaceOnUse">
+                  <path d="M20 0 L40 20 L20 40 L0 20 Z" fill="none" stroke="white" strokeWidth="1"/>
+                  <circle cx="20" cy="20" r="5" fill="none" stroke="white" strokeWidth="0.5"/>
+                </pattern>
+              </defs>
+              <rect width="400" height="400" fill="url(#hero-pattern)"/>
             </svg>
-            {t("نظام المصادقة جاهز!", "Système d'authentification prêt !")}
           </div>
-          <h2 className="text-3xl md:text-4xl font-bold text-slate-900 mb-4">
-            {t('مرحباً بك في غالينينو', 'Bienvenue sur Ghalinino')}
-          </h2>
-          <p className="text-slate-600 text-lg max-w-2xl mx-auto">
-            {t(
-              'منصة التجارة الإلكترونية المتكاملة للسوق التونسي مع دعم حسابات التجزئة والجملة',
-              'Plateforme e-commerce complète pour le marché tunisien avec support comptes détail et gros'
-            )}
-          </p>
-        </div>
 
-        {/* Auth status card */}
-        {isAuthenticated && (
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 mb-12">
-            <div className="flex items-start gap-4">
-              <div className="w-14 h-14 bg-gradient-to-br from-red-600 to-red-700 rounded-xl flex items-center justify-center text-white font-bold text-xl">
-                {user?.fullName?.charAt(0) || user?.email?.charAt(0) || '?'}
-              </div>
-              <div className="flex-1">
-                <h3 className="font-bold text-slate-900 text-lg">
-                  {t('مرحباً', 'Bonjour')}, {user?.fullName || user?.email}!
-                </h3>
-                <p className="text-slate-600">
-                  {t('أنت مسجل الدخول بنجاح', 'Vous êtes connecté avec succès')}
+          <div className="relative max-w-7xl mx-auto px-4 sm:px-6 py-16 md:py-24">
+            <div className="grid md:grid-cols-2 gap-10 items-center">
+              {/* Left: copy */}
+              <div className={isRTL ? 'text-right order-1' : 'text-left'}>
+                <div className="inline-flex items-center gap-2 bg-white/15 backdrop-blur-sm text-white px-3 py-1.5 rounded-full text-xs font-semibold mb-5 border border-white/20">
+                  <span className="w-1.5 h-1.5 bg-green-400 rounded-full animate-pulse" />
+                  {t('توصيل لجميع ولايات تونس', 'Livraison dans toute la Tunisie')}
+                </div>
+
+                <h1 className="text-4xl md:text-5xl lg:text-6xl font-black text-white leading-tight mb-5">
+                  {language === 'ar' ? (
+                    <>تسوّق بذكاء،<br /><span className="text-red-200">وفّر أكثر</span></>
+                  ) : (
+                    <>Achetez malin,<br /><span className="text-red-200">économisez plus</span></>
+                  )}
+                </h1>
+
+                <p className="text-red-100 text-lg mb-8 max-w-md leading-relaxed">
+                  {t(
+                    'أسعار الجملة متاحة للجميع. سجّل حساب تاجر واستمتع بخصومات تصل إلى 30%',
+                    "Prix grossiste accessibles à tous. Créez un compte pro et profitez de remises jusqu'à 30%"
+                  )}
                 </p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <span className="inline-flex items-center gap-1 px-3 py-1 bg-slate-100 text-slate-700 rounded-full text-sm">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+
+                <div className={cn('flex flex-wrap gap-3', isRTL ? 'justify-end' : 'justify-start')}>
+                  <Link to="/products">
+                    <button className="px-6 py-3 bg-white text-red-600 font-bold rounded-xl hover:bg-red-50 transition-all shadow-lg shadow-red-900/20 text-sm">
+                      {t('تسوّق الآن', 'Acheter maintenant')}
+                    </button>
+                  </Link>
+                  <Link to="/register/wholesale">
+                    <button className="px-6 py-3 bg-transparent border-2 border-white/50 text-white font-bold rounded-xl hover:bg-white/10 transition-all text-sm">
+                      {t('حساب تاجر الجملة', 'Compte grossiste')}
+                    </button>
+                  </Link>
+                </div>
+              </div>
+
+              {/* Right: stats cards */}
+              <div className={cn('grid grid-cols-2 gap-4', isRTL ? 'order-0' : '')} ref={statsRef}>
+                {[
+                  { value: statOrders.toLocaleString(language === 'ar' ? 'ar-TN' : 'fr-TN') + '+', labelAr: 'طلب مكتمل', labelFr: 'commandes livrées' },
+                  { value: statGovernates, labelAr: 'ولاية نوصل إليها', labelFr: 'wilayas couvertes' },
+                  { value: statSavings + '%', labelAr: 'خصم للجملة', labelFr: 'remise grossiste' },
+                  { value: '48h', labelAr: 'توصيل سريع', labelFr: 'livraison rapide' },
+                ].map((stat, i) => (
+                  <div
+                    key={i}
+                    className="bg-white/10 backdrop-blur-sm border border-white/20 rounded-2xl p-5 text-center hover:bg-white/15 transition-colors"
+                  >
+                    <div className="text-3xl font-black text-white mb-1">{stat.value}</div>
+                    <div className="text-red-200 text-xs font-medium">
+                      {language === 'ar' ? stat.labelAr : stat.labelFr}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
+
+
+        {/* ── TRUST FEATURES ──────────────────────────────────────────────── */}
+        <section className="border-b border-slate-100 bg-slate-50">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {trustFeatures.map((feat, i) => (
+                <div key={i} className="flex items-start gap-3">
+                  <div className="w-10 h-10 bg-red-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                    <svg className="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d={feat.iconPath} />
                     </svg>
-                    {user?.email}
-                  </span>
-                  {user?.phone && (
-                    <span className="inline-flex items-center gap-1 px-3 py-1 bg-slate-100 text-slate-700 rounded-full text-sm">
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
-                      </svg>
-                      {user.phone}
-                    </span>
-                  )}
-                  {isPendingWholesale && (
-                    <span className="inline-flex items-center gap-1 px-3 py-1 bg-amber-100 text-amber-700 rounded-full text-sm">
-                      <span className="w-2 h-2 bg-amber-500 rounded-full animate-pulse" />
-                      {t('طلب جملة قيد المراجعة', 'Demande grossiste en cours')}
-                    </span>
-                  )}
-                  {isWholesale && (
-                    <span className="inline-flex items-center gap-1 px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm">
-                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                      </svg>
-                      {t('تاجر جملة معتمد', 'Grossiste approuvé')}
-                    </span>
+                  </div>
+                  <div>
+                    <div className="font-semibold text-slate-900 text-sm leading-snug">
+                      {language === 'ar' ? feat.titleAr : feat.titleFr}
+                    </div>
+                    <div className="text-slate-500 text-xs mt-0.5 leading-snug hidden md:block">
+                      {language === 'ar' ? feat.descAr : feat.descFr}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* ── CATEGORIES ──────────────────────────────────────────────────── */}
+        {categories.length > 0 && (
+          <section className="py-12 max-w-7xl mx-auto px-4 sm:px-6">
+            <div className="flex items-center justify-between mb-7">
+              <div>
+                <h2 className="text-2xl font-black text-slate-900">
+                  {t('تسوّق حسب الفئة', 'Acheter par catégorie')}
+                </h2>
+                <p className="text-slate-500 text-sm mt-1">
+                  {t('استكشف تشكيلتنا المتنوعة', 'Explorez notre sélection variée')}
+                </p>
+              </div>
+              <Link
+                to="/products"
+                className="text-sm font-semibold text-red-600 hover:text-red-700 transition-colors flex items-center gap-1"
+              >
+                {t('عرض الكل', 'Voir tout')}
+                <svg className={cn('w-4 h-4', isRTL && 'rotate-180')} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              </Link>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+              {categories.slice(0, 10).map((cat, i) => {
+                const colors = [
+                  'from-red-500 to-rose-600',
+                  'from-orange-500 to-amber-600',
+                  'from-emerald-500 to-teal-600',
+                  'from-blue-500 to-indigo-600',
+                  'from-purple-500 to-violet-600',
+                  'from-pink-500 to-rose-500',
+                  'from-cyan-500 to-blue-500',
+                  'from-lime-500 to-green-600',
+                  'from-amber-500 to-orange-500',
+                  'from-fuchsia-500 to-purple-600',
+                ];
+                return (
+                  <Link
+                    key={cat.id}
+                    to={`/products/${cat.slug}`}
+                    className="group relative rounded-2xl overflow-hidden bg-gradient-to-br aspect-[4/3] flex flex-col justify-end p-4 hover:scale-[1.02] transition-transform duration-200 shadow-sm hover:shadow-md"
+                    style={{ background: `linear-gradient(135deg, var(--tw-gradient-stops))` }}
+                  >
+                    <div className={cn('absolute inset-0 bg-gradient-to-br opacity-90', colors[i % colors.length])} />
+                    <div className="relative z-10">
+                      <div className="text-white font-bold text-sm leading-tight">
+                        {language === 'ar' ? cat.name_ar : cat.name_fr}
+                      </div>
+                    </div>
+                  </Link>
+                );
+              })}
+
+              {/* "All products" catch-all tile */}
+              <Link
+                to="/products"
+                className="group relative rounded-2xl overflow-hidden bg-slate-900 aspect-[4/3] flex flex-col justify-end p-4 hover:scale-[1.02] transition-transform duration-200 shadow-sm hover:shadow-md"
+              >
+                <div className="relative z-10">
+                  <div className="text-white font-bold text-sm">{t('جميع المنتجات', 'Tous les produits')}</div>
+                  <div className="text-slate-400 text-xs mt-0.5">{t('اكتشف المزيد →', 'Explorer →')}</div>
+                </div>
+              </Link>
+            </div>
+          </section>
+        )}
+
+        {/* ── FEATURED PRODUCTS ───────────────────────────────────────────── */}
+        <section className="py-12 bg-slate-50">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6">
+            <div className="flex items-center justify-between mb-7">
+              <div>
+                <h2 className="text-2xl font-black text-slate-900">
+                  {t('منتجات مميزة', 'Produits vedettes')}
+                </h2>
+                <p className="text-slate-500 text-sm mt-1">
+                  {t('اختيارات بعناية لأفضل العروض', 'Une sélection soigneuse des meilleures offres')}
+                </p>
+              </div>
+              <Link
+                to="/products"
+                className="text-sm font-semibold text-red-600 hover:text-red-700 transition-colors flex items-center gap-1"
+              >
+                {t('عرض الكل', 'Voir tout')}
+                <svg className={cn('w-4 h-4', isRTL && 'rotate-180')} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                </svg>
+              </Link>
+            </div>
+
+            {productsLoading ? (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {[...Array(4)].map((_, i) => (
+                  <ProductCardSkeleton key={i} />
+                ))}
+              </div>
+            ) : featuredProducts.length > 0 ? (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {featuredProducts.map((product) => (
+                  <ProductCard key={product.id} product={product} />
+                ))}
+              </div>
+            ) : (
+              /* Empty state — show CTA to browse */
+              <div className="text-center py-16">
+                <div className="w-16 h-16 bg-red-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                  <svg className="w-8 h-8 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+                  </svg>
+                </div>
+                <p className="text-slate-500 text-sm mb-4">{t('المنتجات قادمة قريباً', 'Produits bientôt disponibles')}</p>
+                <Link to="/products">
+                  <button className="px-5 py-2.5 bg-red-600 text-white rounded-xl text-sm font-semibold hover:bg-red-700 transition-colors">
+                    {t('تصفح المنتجات', 'Parcourir les produits')}
+                  </button>
+                </Link>
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* ── WHOLESALE PROMO BANNER ───────────────────────────────────────── */}
+        {!isWholesale && (
+          <section className="py-10 max-w-7xl mx-auto px-4 sm:px-6">
+            <div
+              className="rounded-3xl overflow-hidden relative"
+              style={{
+                background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 50%, #1e293b 100%)',
+              }}
+            >
+              {/* Decorative blobs */}
+              <div className="absolute top-0 right-0 w-64 h-64 bg-red-600 rounded-full opacity-10 translate-x-1/3 -translate-y-1/3" />
+              <div className="absolute bottom-0 left-0 w-48 h-48 bg-red-500 rounded-full opacity-10 -translate-x-1/3 translate-y-1/3" />
+
+              <div className="relative px-8 py-10 md:py-12 flex flex-col md:flex-row items-center justify-between gap-8">
+                <div className={isRTL ? 'text-right' : 'text-left'}>
+                  <div className="inline-flex items-center gap-2 bg-red-600/20 text-red-400 px-3 py-1 rounded-full text-xs font-semibold mb-3 border border-red-500/30">
+                    <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg>
+                    {t('برنامج التجار', 'Programme grossiste')}
+                  </div>
+                  <h3 className="text-2xl md:text-3xl font-black text-white mb-3">
+                    {language === 'ar' ? (
+                      <>بِع بالجملة،<br />اربح أكثر</>
+                    ) : (
+                      <>Vendez en gros,<br />gagnez plus</>
+                    )}
+                  </h3>
+                  <p className="text-slate-400 text-sm max-w-md leading-relaxed">
+                    {t(
+                      'سجّل حسابك كتاجر وتمتع بأسعار حصرية، شحن مجاني فوق 500 د.ت، وأولوية المعالجة',
+                      "Inscrivez-vous comme grossiste et profitez de prix exclusifs, livraison gratuite dès 500 TND et traitement prioritaire"
+                    )}
+                  </p>
+                  <div className="flex flex-wrap gap-3 mt-5">
+                    <div className="flex items-center gap-2 text-slate-300 text-xs">
+                      <svg className="w-4 h-4 text-green-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/></svg>
+                      {t('خصم حتى 30%', "Jusqu'à 30% de remise")}
+                    </div>
+                    <div className="flex items-center gap-2 text-slate-300 text-xs">
+                      <svg className="w-4 h-4 text-green-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/></svg>
+                      {t('شحن مجاني فوق 500 د.ت', 'Livraison gratuite dès 500 TND')}
+                    </div>
+                    <div className="flex items-center gap-2 text-slate-300 text-xs">
+                      <svg className="w-4 h-4 text-green-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7"/></svg>
+                      {t('دعم متميز', 'Support prioritaire')}
+                    </div>
+                  </div>
+                </div>
+
+                <div className={cn('flex flex-col gap-3 flex-shrink-0', isRTL ? 'items-start' : 'items-end')}>
+                  <Link to="/register/wholesale">
+                    <button className="px-7 py-3.5 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl transition-all shadow-lg shadow-red-900/40 text-sm whitespace-nowrap">
+                      {t('سجّل كتاجر جملة', "S'inscrire comme grossiste")}
+                    </button>
+                  </Link>
+                  {!isAuthenticated && (
+                    <Link to="/login" className="text-slate-400 hover:text-white text-sm transition-colors text-center">
+                      {t('لديك حساب؟ سجّل دخولك', 'Déjà inscrit ? Connectez-vous')}
+                    </Link>
                   )}
                 </div>
               </div>
             </div>
-          </div>
+          </section>
         )}
 
-        {/* Features grid */}
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6 mb-12">
-          {[
-            {
-              icon: '🛍️',
-              titleAr: 'تصفح المنتجات',
-              titleFr: 'Parcourir les produits',
-              descAr: 'اكتشف منتجاتنا مع الفلاتر والترتيب',
-              descFr: 'Découvrez nos produits avec filtres et tri',
-              link: '/products',
-            },
-            {
-              icon: '🔐',
-              titleAr: 'تسجيل دخول/تسجيل',
-              titleFr: 'Connexion/Inscription',
-              descAr: 'بريد إلكتروني + كلمة مرور أو رابط سحري',
-              descFr: 'Email + mot de passe ou lien magique',
-              link: '/login',
-            },
-            {
-              icon: '🏢',
-              titleAr: 'حساب تاجر جملة',
-              titleFr: 'Compte Grossiste',
-              descAr: 'تسجيل مع رفع رخصة التجارة',
-              descFr: 'Inscription avec upload de patente',
-              link: '/register/wholesale',
-            },
-          ].map((feature, i) => (
-            <Link
-              key={i}
-              to={feature.link}
-              className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 hover:shadow-md hover:border-red-200 transition-all group"
-            >
-              <span className="text-4xl mb-4 block">{feature.icon}</span>
-              <h4 className="font-bold text-slate-900 mb-2 group-hover:text-red-600 transition-colors">
-                {language === 'ar' ? feature.titleAr : feature.titleFr}
-              </h4>
-              <p className="text-slate-600 text-sm">
-                {language === 'ar' ? feature.descAr : feature.descFr}
+        {/* ── SHIPPING ZONES ───────────────────────────────────────────────── */}
+        <section className="py-12 bg-slate-50">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6">
+            <div className={cn('mb-7', isRTL ? 'text-right' : 'text-left')}>
+              <h2 className="text-2xl font-black text-slate-900">
+                {t('أسعار التوصيل', 'Tarifs de livraison')}
+              </h2>
+              <p className="text-slate-500 text-sm mt-1">
+                {t('نوصل لجميع الولايات الـ 24 خلال 24-48 ساعة', 'Livraison dans toutes les 24 wilayas sous 24-48h')}
               </p>
-            </Link>
-          ))}
-        </div>
-
-        {/* Price demo */}
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 mb-12">
-          <h3 className="font-bold text-slate-900 text-lg mb-4 flex items-center gap-2">
-            <svg className="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            {t('أسعار التجزئة vs الجملة', 'Prix Détail vs Gros')}
-          </h3>
-          <div className="grid sm:grid-cols-2 gap-4">
-            <div className="p-4 bg-slate-50 rounded-lg">
-              <p className="text-sm text-slate-500 mb-1">{t('سعر التجزئة', 'Prix détail')}</p>
-              <p className="text-2xl font-bold text-slate-900">{formatPrice(89.900, language)}</p>
             </div>
-            <div className="p-4 bg-green-50 rounded-lg border-2 border-green-200">
-              <p className="text-sm text-green-600 mb-1">{t('سعر الجملة', 'Prix gros')}</p>
-              <p className="text-2xl font-bold text-green-700">{formatPrice(65.000, language)}</p>
-              <p className="text-xs text-green-600 mt-1">-28% {t('توفير', 'économie')}</p>
+
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+              {shippingZones.map((zone, i) => (
+                <div
+                  key={i}
+                  className={cn(
+                    'rounded-2xl border p-5 flex flex-col items-center text-center gap-2',
+                    zone.color
+                  )}
+                >
+                  <svg className="w-6 h-6 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0zM15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                  <div className="font-bold text-base">{language === 'ar' ? zone.labelAr : zone.labelFr}</div>
+                  <div className="text-2xl font-black">{formatPrice(zone.price, language)}</div>
+                </div>
+              ))}
+            </div>
+
+            <div className="bg-white border border-slate-200 rounded-2xl p-5 flex items-center gap-4">
+              <div className="w-10 h-10 bg-green-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+              <p className="text-slate-700 text-sm">
+                <span className="font-semibold text-green-700">{t('شحن مجاني', 'Livraison gratuite')}</span>
+                {' '}{t('لتجار الجملة عند الطلب فوق 500 د.ت', 'pour les grossistes dès 500 TND de commande')}
+              </p>
             </div>
           </div>
-        </div>
+        </section>
 
-        {/* Shipping zones */}
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 mb-12">
-          <h3 className="font-bold text-slate-900 text-lg mb-4 flex items-center gap-2">
-            <svg className="w-5 h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
-            </svg>
-            {t('أسعار التوصيل', 'Tarifs de livraison')}
-          </h3>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            {GOVERNORATES.slice(0, 8).map((gov) => (
-              <div key={gov.id} className="p-3 bg-slate-50 rounded-lg">
-                <p className="font-medium text-slate-900 text-sm">
-                  {language === 'ar' ? gov.name.ar : gov.name.fr}
-                </p>
-                <p className="text-red-600 font-semibold">
-                  {formatPrice(getShippingPrice(gov.id), language)}
-                </p>
+        {/* ── PAYMENT METHODS ─────────────────────────────────────────────── */}
+        <section className="py-12 max-w-7xl mx-auto px-4 sm:px-6">
+          <div className={cn('mb-7', isRTL ? 'text-right' : 'text-left')}>
+            <h2 className="text-2xl font-black text-slate-900">
+              {t('طرق الدفع المتاحة', 'Moyens de paiement')}
+            </h2>
+            <p className="text-slate-500 text-sm mt-1">
+              {t('ادفع بالطريقة التي تناسبك', 'Payez selon votre préférence')}
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {[
+              {
+                icon: (
+                  <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z" />
+                  </svg>
+                ),
+                titleAr: 'الدفع عند الاستلام',
+                titleFr: 'Paiement à la livraison',
+                descAr: '+2 د.ت رسوم معالجة',
+                descFr: '+2 TND frais de traitement',
+                accent: 'text-amber-600 bg-amber-50 border-amber-200',
+              },
+              {
+                icon: (
+                  <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M8 14v3m4-3v3m4-3v3M3 21h18M3 10h18M3 7l9-4 9 4M4 10h16v11H4V10z" />
+                  </svg>
+                ),
+                titleAr: 'تحويل بنكي',
+                titleFr: 'Virement bancaire',
+                descAr: 'مجاني — أمن وموثوق',
+                descFr: 'Gratuit — sécurisé et fiable',
+                accent: 'text-blue-600 bg-blue-50 border-blue-200',
+              },
+              {
+                icon: (
+                  <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.75} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+                  </svg>
+                ),
+                titleAr: 'فلوسي (دفع إلكتروني)',
+                titleFr: 'Flouci (paiement en ligne)',
+                descAr: 'بطاقة بنكية أو E-Dinar',
+                descFr: 'Carte bancaire ou E-Dinar',
+                accent: 'text-green-600 bg-green-50 border-green-200',
+              },
+            ].map((method, i) => (
+              <div
+                key={i}
+                className={cn('rounded-2xl border p-6 flex items-start gap-4', method.accent)}
+              >
+                <div className="flex-shrink-0">{method.icon}</div>
+                <div>
+                  <div className="font-bold text-slate-900 text-sm">
+                    {language === 'ar' ? method.titleAr : method.titleFr}
+                  </div>
+                  <div className="text-slate-500 text-xs mt-1">
+                    {language === 'ar' ? method.descAr : method.descFr}
+                  </div>
+                </div>
               </div>
             ))}
           </div>
-        </div>
-
-        {/* Footer */}
-        <footer className="pt-8 border-t border-slate-200 text-center text-slate-500 text-sm">
-          <p>
-            {t('© 2024 غالينينو. جميع الحقوق محفوظة.', '© 2024 Ghalinino. Tous droits réservés.')}
-          </p>
-          <p className="mt-2">
-            {t(
-              'مبني بـ React + TypeScript + Tailwind CSS + Supabase',
-              'Construit avec React + TypeScript + Tailwind CSS + Supabase'
-            )}
-          </p>
-        </footer>
+        </section>
       </main>
+
+      {/* ── FOOTER ──────────────────────────────────────────────────────────── */}
+      <footer className="bg-slate-900 text-white">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-12">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-8 mb-10">
+            {/* Brand column */}
+            <div className="md:col-span-2">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 bg-red-600 rounded-xl flex items-center justify-center">
+                  <span className="text-white font-black text-lg" style={{ fontFamily: 'Cairo' }}>غ</span>
+                </div>
+                <div>
+                  <div className="font-black text-white text-lg">{t('غالينينو', 'Ghalinino')}</div>
+                  <div className="text-slate-400 text-xs">{t('متجرك في تونس', 'Votre boutique en Tunisie')}</div>
+                </div>
+              </div>
+              <p className="text-slate-400 text-sm leading-relaxed max-w-xs">
+                {t(
+                  'منصة التجارة الإلكترونية الأولى في تونس للتجزئة والجملة. نوصل لجميع الولايات بسرعة وأمان.',
+                  'La première plateforme e-commerce en Tunisie pour le détail et le gros. Livraison rapide et sécurisée dans toutes les wilayas.'
+                )}
+              </p>
+            </div>
+
+            {/* Links */}
+            <div>
+              <div className="font-bold text-sm text-slate-300 mb-4 uppercase tracking-wider">
+                {t('المتجر', 'Boutique')}
+              </div>
+              <ul className="space-y-2.5">
+                {[
+                  { to: '/products', ar: 'جميع المنتجات', fr: 'Tous les produits' },
+                  { to: '/products/promotions', ar: 'العروض والتخفيضات', fr: 'Promotions' },
+                  { to: '/register/wholesale', ar: 'حساب تاجر الجملة', fr: 'Espace grossiste' },
+                ].map((link) => (
+                  <li key={link.to}>
+                    <Link
+                      to={link.to}
+                      className="text-slate-400 hover:text-white text-sm transition-colors"
+                    >
+                      {language === 'ar' ? link.ar : link.fr}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            <div>
+              <div className="font-bold text-sm text-slate-300 mb-4 uppercase tracking-wider">
+                {t('حسابي', 'Mon compte')}
+              </div>
+              <ul className="space-y-2.5">
+                {[
+                  { to: '/login', ar: 'تسجيل الدخول', fr: 'Connexion' },
+                  { to: '/register', ar: 'إنشاء حساب', fr: 'Créer un compte' },
+                  { to: '/account/orders', ar: 'طلباتي', fr: 'Mes commandes' },
+                ].map((link) => (
+                  <li key={link.to}>
+                    <Link
+                      to={link.to}
+                      className="text-slate-400 hover:text-white text-sm transition-colors"
+                    >
+                      {language === 'ar' ? link.ar : link.fr}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+
+          <div className="border-t border-slate-800 pt-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500">
+            <p>© {new Date().getFullYear()} {t('غالينينو. جميع الحقوق محفوظة.', 'Ghalinino. Tous droits réservés.')}</p>
+            <p>{t('صُنع بـ ❤️ في تونس', 'Fait avec ❤️ en Tunisie')}</p>
+          </div>
+        </div>
+      </footer>
     </div>
   );
 }
