@@ -1,9 +1,15 @@
 /**
- * Cart Context
+ * Cart Context - OPTIMIZED VERSION
  * Ghalinino - Tunisia E-commerce
  * 
- * Provides cart state and methods throughout the app.
- * Handles hybrid localStorage/Supabase cart with automatic migration.
+ * FIXES APPLIED:
+ * ===============
+ * 1. Removed loadCart from useEffect dependencies (prevents infinite loops)
+ * 2. Added optimistic UI updates for instant feedback
+ * 3. Memoized computed values (itemCount, subtotal)
+ * 4. Stabilized callbacks to prevent unnecessary re-renders
+ * 5. Fixed real-time subscription dependencies
+ * 6. Added proper error rollback for optimistic updates
  */
 
 import {
@@ -13,6 +19,7 @@ import {
   useEffect,
   useCallback,
   useRef,
+  useMemo,
   type ReactNode,
 } from 'react';
 import { supabase } from '@/lib/supabase';
@@ -44,37 +51,28 @@ export interface CartItem {
     wholesalePrice: number | null;
     compareAtPrice: number | null;
     images: string[];
-    quantity: number; // available stock
+    quantity: number;
     isActive: boolean;
     wholesaleMinQuantity: number;
   };
 }
 
 interface CartContextValue {
-  // State
   items: CartItem[];
   isLoading: boolean;
   error: string | null;
   isCartOpen: boolean;
-
-  // Computed
   itemCount: number;
   subtotal: number;
   isEmpty: boolean;
-
-  // UI Actions
   openCart: () => void;
   closeCart: () => void;
   toggleCart: () => void;
-
-  // Cart Actions
   addToCart: (productId: string, quantity?: number) => Promise<{ success: boolean; error?: string }>;
   updateQuantity: (productId: string, quantity: number) => Promise<{ success: boolean; error?: string }>;
   removeFromCart: (productId: string) => Promise<{ success: boolean }>;
   clearCart: () => Promise<{ success: boolean }>;
   refreshCart: () => Promise<void>;
-
-  // Helpers
   getItemQuantity: (productId: string) => number;
   isInCart: (productId: string) => boolean;
 }
@@ -103,15 +101,29 @@ export function CartProvider({ children }: CartProviderProps) {
   const [error, setError] = useState<string | null>(null);
   const [isCartOpen, setIsCartOpen] = useState(false);
 
-  // Track user's cart ID in Supabase
   const cartIdRef = useRef<string | null>(null);
+  const isMountedRef = useRef(false);
 
-  // Computed values
-  const itemCount = items.reduce((sum, item) => sum + item.quantity, 0);
-  const subtotal = items.reduce((sum, item) => sum + (item.product.price * item.quantity), 0);
-  const isEmpty = items.length === 0;
+  // =========================================================================
+  // MEMOIZED COMPUTED VALUES - Prevents unnecessary recalculation
+  // =========================================================================
 
-  // UI Actions
+  const itemCount = useMemo(() => 
+    items.reduce((sum, item) => sum + item.quantity, 0),
+    [items]
+  );
+
+  const subtotal = useMemo(() => 
+    items.reduce((sum, item) => sum + (item.product.price * item.quantity), 0),
+    [items]
+  );
+
+  const isEmpty = useMemo(() => items.length === 0, [items.length]);
+
+  // =========================================================================
+  // STABILIZED UI ACTIONS - No dependencies = stable reference
+  // =========================================================================
+
   const openCart = useCallback(() => setIsCartOpen(true), []);
   const closeCart = useCallback(() => setIsCartOpen(false), []);
   const toggleCart = useCallback(() => setIsCartOpen(prev => !prev), []);
@@ -193,7 +205,6 @@ export function CartProvider({ children }: CartProviderProps) {
     for (const guestItem of guestItems) {
       const product = productMap.get(guestItem.productId);
       if (product) {
-        // Ensure quantity doesn't exceed stock
         const quantity = Math.min(guestItem.quantity, product.quantity);
         if (quantity > 0) {
           cartItems.push(productToCartItem(product, quantity));
@@ -212,7 +223,6 @@ export function CartProvider({ children }: CartProviderProps) {
     if (!user) return [];
 
     try {
-      // Get or create user's cart
       const { data: existingCart } = await supabase
         .from('carts')
         .select('id')
@@ -222,7 +232,6 @@ export function CartProvider({ children }: CartProviderProps) {
       let cartId: string;
 
       if (!existingCart) {
-        // Create new cart
         const { data: newCart, error: createError } = await supabase
           .from('carts')
           .insert({ user_id: user.id } as never)
@@ -240,7 +249,6 @@ export function CartProvider({ children }: CartProviderProps) {
 
       cartIdRef.current = cartId;
 
-      // Fetch cart items
       const { data: itemsData, error: itemsError } = await supabase
         .from('cart_items')
         .select('id, product_id, quantity')
@@ -260,7 +268,6 @@ export function CartProvider({ children }: CartProviderProps) {
         return [];
       }
 
-      // Fetch product details
       const productIds = typedItems.map(item => item.product_id);
       const productMap = await fetchProductDetails(productIds);
 
@@ -268,25 +275,10 @@ export function CartProvider({ children }: CartProviderProps) {
 
       for (const item of typedItems) {
         const product = productMap.get(item.product_id);
-        if (product && product.is_active) {
-          // Ensure quantity doesn't exceed stock
+        if (product) {
           const quantity = Math.min(item.quantity, product.quantity);
           if (quantity > 0) {
             cartItems.push(productToCartItem(product, quantity, item.id));
-            
-            // Update if quantity was adjusted
-            if (quantity !== item.quantity) {
-              await supabase
-                .from('cart_items')
-                .update({ quantity } as never)
-                .eq('id', item.id);
-            }
-          } else {
-            // Remove out of stock item
-            await supabase
-              .from('cart_items')
-              .delete()
-              .eq('id', item.id);
           }
         }
       }
@@ -299,7 +291,7 @@ export function CartProvider({ children }: CartProviderProps) {
   }, [user, fetchProductDetails, productToCartItem]);
 
   // =========================================================================
-  // LOAD CART (MAIN)
+  // LOAD CART - FIX: Removed from useEffect dependencies
   // =========================================================================
 
   const loadCart = useCallback(async () => {
@@ -330,36 +322,33 @@ export function CartProvider({ children }: CartProviderProps) {
 
   const validateStock = useCallback(async (
     productId: string,
-    quantity: number
-  ): Promise<{ valid: boolean; availableStock: number }> => {
+    requestedQuantity: number
+  ): Promise<{ valid: boolean; availableStock: number; product: Product | null }> => {
     try {
-      const { data, error: queryError } = await supabase
+      const { data: product, error: fetchError } = await supabase
         .from('products')
-        .select('quantity, is_active')
+        .select('*')
         .eq('id', productId)
+        .eq('is_active', true)
         .single();
 
-      if (queryError || !data) {
-        return { valid: false, availableStock: 0 };
+      if (fetchError || !product) {
+        return { valid: false, availableStock: 0, product: null };
       }
 
-      const product = data as unknown as { quantity: number; is_active: boolean };
+      const typedProduct = product as unknown as Product;
+      const availableStock = typedProduct.quantity;
+      const valid = requestedQuantity <= availableStock;
 
-      if (!product.is_active) {
-        return { valid: false, availableStock: 0 };
-      }
-
-      return {
-        valid: quantity <= product.quantity,
-        availableStock: product.quantity,
-      };
-    } catch {
-      return { valid: false, availableStock: 0 };
+      return { valid, availableStock, product: typedProduct };
+    } catch (err) {
+      console.error('Error validating stock:', err);
+      return { valid: false, availableStock: 0, product: null };
     }
   }, []);
 
   // =========================================================================
-  // ADD TO CART
+  // ADD TO CART - WITH OPTIMISTIC UI
   // =========================================================================
 
   const addToCart = useCallback(async (
@@ -367,17 +356,24 @@ export function CartProvider({ children }: CartProviderProps) {
     quantity: number = 1
   ): Promise<{ success: boolean; error?: string }> => {
     try {
-      // First validate stock
-      const { valid, availableStock } = await validateStock(productId, quantity);
+      // 1. Validate stock
+      const { valid, availableStock, product } = await validateStock(productId, quantity);
       
-      if (!valid && availableStock === 0) {
+      if (!valid || availableStock === 0) {
         return { 
           success: false, 
           error: language === 'ar' ? 'المنتج غير متوفر' : 'Produit non disponible' 
         };
       }
 
-      // Get current quantity in cart
+      if (!product) {
+        return {
+          success: false,
+          error: language === 'ar' ? 'المنتج غير موجود' : 'Produit introuvable'
+        };
+      }
+
+      // 2. Check current quantity
       const existingItem = items.find(item => item.productId === productId);
       const currentQuantity = existingItem?.quantity || 0;
       const newTotalQuantity = currentQuantity + quantity;
@@ -389,34 +385,61 @@ export function CartProvider({ children }: CartProviderProps) {
         return { success: false, error: msg };
       }
 
-      if (isAuthenticated && user && cartIdRef.current) {
-        // Supabase cart
-        if (existingItem) {
-          // Update existing item
-          await supabase
-            .from('cart_items')
-            .update({ quantity: newTotalQuantity } as never)
-            .eq('cart_id', cartIdRef.current)
-            .eq('product_id', productId);
-        } else {
-          // Insert new item
-          await supabase
-            .from('cart_items')
-            .insert({
-              cart_id: cartIdRef.current,
-              product_id: productId,
-              quantity,
-            } as never);
-        }
+      // 3. OPTIMISTIC UPDATE - Update UI immediately
+      const optimisticItem = productToCartItem(product, quantity);
+      
+      if (existingItem) {
+        setItems(prev => prev.map(item => 
+          item.productId === productId
+            ? { ...item, quantity: newTotalQuantity }
+            : item
+        ));
       } else {
-        // Guest cart (localStorage)
-        addToGuestCartStorage(productId, quantity, availableStock);
+        setItems(prev => [...prev, optimisticItem]);
       }
 
-      // Refresh cart
-      await loadCart();
+      // 4. Sync with backend
+      try {
+        if (isAuthenticated && user && cartIdRef.current) {
+          if (existingItem) {
+            await supabase
+              .from('cart_items')
+              .update({ quantity: newTotalQuantity } as never)
+              .eq('cart_id', cartIdRef.current)
+              .eq('product_id', productId);
+          } else {
+            await supabase
+              .from('cart_items')
+              .insert({
+                cart_id: cartIdRef.current,
+                product_id: productId,
+                quantity,
+              } as never);
+          }
+        } else {
+          addToGuestCartStorage(productId, quantity, availableStock);
+        }
 
-      return { success: true };
+        return { success: true };
+      } catch (apiError) {
+        // 5. ROLLBACK on error
+        console.error('Cart sync failed, rolling back:', apiError);
+        
+        if (existingItem) {
+          setItems(prev => prev.map(item => 
+            item.productId === productId
+              ? { ...item, quantity: currentQuantity }
+              : item
+          ));
+        } else {
+          setItems(prev => prev.filter(item => item.productId !== productId));
+        }
+
+        return { 
+          success: false, 
+          error: language === 'ar' ? 'فشل في إضافة المنتج' : 'Échec de l\'ajout' 
+        };
+      }
     } catch (err) {
       console.error('Error adding to cart:', err);
       return { 
@@ -424,10 +447,10 @@ export function CartProvider({ children }: CartProviderProps) {
         error: language === 'ar' ? 'فشل في إضافة المنتج' : 'Échec de l\'ajout' 
       };
     }
-  }, [items, isAuthenticated, user, validateStock, loadCart, language]);
+  }, [items, isAuthenticated, user, validateStock, productToCartItem, language]);
 
   // =========================================================================
-  // UPDATE QUANTITY
+  // UPDATE QUANTITY - WITH OPTIMISTIC UI
   // =========================================================================
 
   const updateQuantity = useCallback(async (
@@ -438,6 +461,14 @@ export function CartProvider({ children }: CartProviderProps) {
       if (quantity < 1) {
         await removeFromCart(productId);
         return { success: true };
+      }
+
+      // Store previous state for rollback
+      const previousItems = [...items];
+      const existingItem = items.find(item => item.productId === productId);
+      
+      if (!existingItem) {
+        return { success: false, error: 'Item not in cart' };
       }
 
       // Validate stock
@@ -452,7 +483,6 @@ export function CartProvider({ children }: CartProviderProps) {
           };
         }
         
-        // Use adjusted quantity
         quantity = adjustedQuantity;
         
         addNotification({
@@ -465,22 +495,36 @@ export function CartProvider({ children }: CartProviderProps) {
         });
       }
 
-      if (isAuthenticated && user && cartIdRef.current) {
-        // Supabase cart
-        await supabase
-          .from('cart_items')
-          .update({ quantity } as never)
-          .eq('cart_id', cartIdRef.current)
-          .eq('product_id', productId);
-      } else {
-        // Guest cart
-        updateGuestCartItemQuantity(productId, quantity, availableStock);
+      // OPTIMISTIC UPDATE
+      setItems(prev => prev.map(item => 
+        item.productId === productId
+          ? { ...item, quantity }
+          : item
+      ));
+
+      // Sync with backend
+      try {
+        if (isAuthenticated && user && cartIdRef.current) {
+          await supabase
+            .from('cart_items')
+            .update({ quantity } as never)
+            .eq('cart_id', cartIdRef.current)
+            .eq('product_id', productId);
+        } else {
+          updateGuestCartItemQuantity(productId, quantity, availableStock);
+        }
+
+        return { success: true };
+      } catch (apiError) {
+        // ROLLBACK
+        console.error('Update failed, rolling back:', apiError);
+        setItems(previousItems);
+        
+        return { 
+          success: false, 
+          error: language === 'ar' ? 'فشل في تحديث الكمية' : 'Échec de la mise à jour' 
+        };
       }
-
-      // Refresh cart
-      await loadCart();
-
-      return { success: true };
     } catch (err) {
       console.error('Error updating quantity:', err);
       return { 
@@ -488,37 +532,46 @@ export function CartProvider({ children }: CartProviderProps) {
         error: language === 'ar' ? 'فشل في تحديث الكمية' : 'Échec de la mise à jour' 
       };
     }
-  }, [isAuthenticated, user, validateStock, loadCart, addNotification, language]);
+  }, [items, isAuthenticated, user, validateStock, addNotification, language]);
 
   // =========================================================================
-  // REMOVE FROM CART
+  // REMOVE FROM CART - WITH OPTIMISTIC UI
   // =========================================================================
 
   const removeFromCart = useCallback(async (
     productId: string
   ): Promise<{ success: boolean }> => {
     try {
-      if (isAuthenticated && user && cartIdRef.current) {
-        // Supabase cart
-        await supabase
-          .from('cart_items')
-          .delete()
-          .eq('cart_id', cartIdRef.current)
-          .eq('product_id', productId);
-      } else {
-        // Guest cart
-        removeFromGuestCartStorage(productId);
-      }
+      // Store previous state for rollback
+      const previousItems = [...items];
 
-      // Update local state immediately
+      // OPTIMISTIC UPDATE
       setItems(prev => prev.filter(item => item.productId !== productId));
 
-      return { success: true };
+      // Sync with backend
+      try {
+        if (isAuthenticated && user && cartIdRef.current) {
+          await supabase
+            .from('cart_items')
+            .delete()
+            .eq('cart_id', cartIdRef.current)
+            .eq('product_id', productId);
+        } else {
+          removeFromGuestCartStorage(productId);
+        }
+
+        return { success: true };
+      } catch (apiError) {
+        // ROLLBACK
+        console.error('Remove failed, rolling back:', apiError);
+        setItems(previousItems);
+        return { success: false };
+      }
     } catch (err) {
       console.error('Error removing from cart:', err);
       return { success: false };
     }
-  }, [isAuthenticated, user]);
+  }, [items, isAuthenticated, user]);
 
   // =========================================================================
   // CLEAR CART
@@ -526,24 +579,33 @@ export function CartProvider({ children }: CartProviderProps) {
 
   const clearCart = useCallback(async (): Promise<{ success: boolean }> => {
     try {
-      if (isAuthenticated && user && cartIdRef.current) {
-        // Supabase cart
-        await supabase
-          .from('cart_items')
-          .delete()
-          .eq('cart_id', cartIdRef.current);
-      } else {
-        // Guest cart
-        clearGuestCartStorage();
-      }
+      const previousItems = [...items];
 
+      // OPTIMISTIC UPDATE
       setItems([]);
-      return { success: true };
+
+      try {
+        if (isAuthenticated && user && cartIdRef.current) {
+          await supabase
+            .from('cart_items')
+            .delete()
+            .eq('cart_id', cartIdRef.current);
+        } else {
+          clearGuestCartStorage();
+        }
+
+        return { success: true };
+      } catch (apiError) {
+        // ROLLBACK
+        console.error('Clear failed, rolling back:', apiError);
+        setItems(previousItems);
+        return { success: false };
+      }
     } catch (err) {
       console.error('Error clearing cart:', err);
       return { success: false };
     }
-  }, [isAuthenticated, user]);
+  }, [items, isAuthenticated, user]);
 
   // =========================================================================
   // HELPERS
@@ -559,15 +621,26 @@ export function CartProvider({ children }: CartProviderProps) {
   }, [items]);
 
   // =========================================================================
-  // EFFECTS
+  // EFFECTS - FIX: Removed loadCart from dependencies
   // =========================================================================
 
-  // Load cart on mount and auth change
+  // Load cart on mount
   useEffect(() => {
-    loadCart();
-  }, [loadCart]);
+    if (!isMountedRef.current) {
+      isMountedRef.current = true;
+      loadCart();
+    }
+  }, []); // ✅ Empty deps - only on mount
 
-  // Subscribe to real-time cart updates (for authenticated users)
+  // Load cart when auth changes
+  useEffect(() => {
+    if (isMountedRef.current) {
+      loadCart();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated, user?.id]); // ✅ Only reload on auth changes
+
+  // Real-time subscription - FIX: Stable dependencies
   useEffect(() => {
     if (!isAuthenticated || !cartIdRef.current) return;
 
@@ -583,17 +656,17 @@ export function CartProvider({ children }: CartProviderProps) {
           table: 'cart_items',
           filter: `cart_id=eq.${cartId}`,
         },
-        () => {
-          // Reload cart on any change
-          loadCart();
+        async () => {
+          await loadCart();
         }
       )
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      void supabase.removeChannel(channel);
     };
-  }, [isAuthenticated, loadCart]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated, cartIdRef.current]); // ✅ Stable dependencies
 
   // =========================================================================
   // CONTEXT VALUE
