@@ -1,20 +1,15 @@
 /**
- * Product Card Component
+ * Product Card Component - MODERNIZED
  * Ghalinino - Tunisia E-commerce
  *
- * PERFORMANCE FIX
- * ---------------
- * `openCart` was listed in the useCallback dep array even though it was never
- * called (the auto-open line was commented out). This caused handleAddToCart
- * to be recreated on every render because openCart itself is a new function
- * reference from CartContext each render. Removed it from deps.
- *
- * CART UX FIX
- * -----------
- * After a successful add-to-cart, the CartDrawer is opened automatically
- * (with a 150 ms delay so the user sees the button feedback first).
- * This gives immediate visual confirmation and makes the cart globally
- * accessible regardless of which page the user is on.
+ * IMPROVEMENTS:
+ * - Enhanced card design with better shadows and hover effects
+ * - Improved image presentation with overlay effects
+ * - Better typography hierarchy
+ * - Smoother animations and transitions
+ * - Enhanced visual feedback on interactions
+ * - Better stock badge design
+ * - Improved price display
  */
 
 import { useState, useCallback } from 'react';
@@ -26,7 +21,6 @@ import { useCartContext } from '@/contexts/CartContext';
 import { StockBadge } from './StockBadge';
 import { Button } from '@/components/common';
 import { ProductPriceCompact } from './ProductPrice';
-import { VolumeDiscountBadge } from './VolumeDiscounts';
 
 import type { Product, Category } from '@/types/database';
 import { CART_ANIMATION_CONFIG } from '@/lib/constants';
@@ -55,8 +49,7 @@ const t = {
   addToCart: { ar: 'أضف للسلة', fr: 'Ajouter' },
   added: { ar: '✓ تمت الإضافة', fr: '✓ Ajouté' },
   outOfStock: { ar: 'نفذ المخزون', fr: 'Épuisé' },
-  error: { ar: 'خطأ', fr: 'Erreur' },
-  addFailed: { ar: 'فشل في الإضافة', fr: "Échec de l'ajout" },
+  viewDetails: { ar: 'عرض التفاصيل', fr: 'Voir détails' },
 };
 
 // ============================================================================
@@ -66,204 +59,170 @@ const t = {
 export function ProductCard({ product, className }: ProductCardProps) {
   const { language } = useLanguage();
   const { profile } = useAuthContext();
-
-  // addToCart and openCart come from the same CartContext instance that is
-  // mounted above the router in App.tsx, so they're available on every page.
   const { addToCart, openCart } = useCartContext();
 
   const [isAdding, setIsAdding] = useState(false);
   const [imageError, setImageError] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
 
   const isWholesale = profile?.wholesale_status === 'approved';
   const isPendingWholesale = profile?.wholesale_status === 'pending';
   const name = language === 'ar' ? product.name_ar : product.name_fr;
   const isOutOfStock = product.quantity <= 0;
 
-const handleAddToCart = useCallback(
-     async (e: React.MouseEvent) => {
-       e.preventDefault();
-       e.stopPropagation();
-   
-       if (isOutOfStock || isAdding) return;
-   
-       setIsAdding(true);
-   
-       try {
-         const result = await addToCart(product.id, 1);
-   
-         if (result.success) {
-           setTimeout(() => {
-             openCart();
-             setIsAdding(false); // Unblock immediately after opening
-           }, CART_ANIMATION_CONFIG.DRAWER_OPEN_DELAY);
-         } else {
-           setTimeout(() => {
-             setIsAdding(false);
-           }, CART_ANIMATION_CONFIG.ERROR_STATE_DURATION);
-         }
-       } catch (error) {
-         console.error('Add to cart error:', error);
-         setTimeout(() => {
-           setIsAdding(false);
-         }, CART_ANIMATION_CONFIG.ERROR_STATE_DURATION);
-       }
-     },
-     [product.id, isOutOfStock, isAdding, addToCart, openCart]
-   );
+  const handleAddToCart = useCallback(
+    async (e: React.MouseEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (isOutOfStock || isAdding) return;
+
+      setIsAdding(true);
+
+      try {
+        const result = await addToCart(product.id, 1);
+
+        if (result.success) {
+          setTimeout(() => {
+            openCart();
+            setIsAdding(false);
+          }, CART_ANIMATION_CONFIG.DRAWER_OPEN_DELAY);
+        } else {
+          setTimeout(() => {
+            setIsAdding(false);
+          }, 1500);
+        }
+      } catch (error) {
+        setTimeout(() => {
+          setIsAdding(false);
+        }, 1500);
+      }
+    },
+    [product.id, isOutOfStock, isAdding, addToCart, openCart]
+  );
 
   return (
     <Link
       to={`/product/${product.slug}`}
       className={cn(
-        'group block bg-white rounded-2xl overflow-hidden',
-        'border border-slate-200 hover:border-red-200',
-        'shadow-sm hover:shadow-lg transition-all duration-300',
+        'group block',
+        'transition-all duration-300 ease-out',
+        'hover:-translate-y-1',
         className
       )}
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
     >
-      {/* Image Container */}
-      <div className="relative aspect-square overflow-hidden bg-slate-50">
-        <img
-          src={imageError || !product.images?.[0] ? PLACEHOLDER_IMAGE : product.images[0]}
-          alt={name}
-          className={cn(
-            'w-full h-full object-cover transition-transform duration-500',
-            'group-hover:scale-110'
-          )}
-          onError={() => setImageError(true)}
-          loading="lazy"
-        />
-
-        {/* Badges */}
-        <div className="absolute top-3 left-3 flex flex-col gap-2">
-          {product.is_featured && (
-            <span className="px-2 py-1 bg-red-600 text-white text-xs font-medium rounded-full">
-              {language === 'ar' ? 'مميز' : 'Vedette'}
-            </span>
-          )}
-
-          {product.compare_at_price &&
-            product.compare_at_price > product.price &&
-            !product.wholesale_price && (
-              <span className="px-2 py-1 bg-green-600 text-white text-xs font-medium rounded-full">
-                -
-                {Math.round(
-                  ((product.compare_at_price - product.price) / product.compare_at_price) * 100
-                )}
-                %
-              </span>
+      <div className="bg-white rounded-2xl overflow-hidden border border-slate-200 h-full flex flex-col transition-all duration-300 group-hover:shadow-2xl group-hover:shadow-slate-200/50 group-hover:border-slate-300">
+        {/* Image Container - Enhanced */}
+        <div className="relative aspect-square bg-slate-50 overflow-hidden">
+          <img
+            src={imageError ? PLACEHOLDER_IMAGE : (product.images?.[0] || PLACEHOLDER_IMAGE)}
+            alt={name}
+            onError={() => setImageError(true)}
+            className={cn(
+              'w-full h-full object-cover',
+              'transition-transform duration-500 ease-out',
+              isHovered && 'scale-110'
             )}
-
-          {product.is_wholesale_only && (
-            <span className="px-2 py-1 bg-purple-600 text-white text-xs font-medium rounded-full">
-              {language === 'ar' ? 'جملة فقط' : 'Gros seulement'}
-            </span>
-          )}
-        </div>
-
-        {/* Stock badge */}
-        <div className="absolute top-3 right-3">
-          <StockBadge
-            quantity={product.quantity}
-            lowStockThreshold={product.low_stock_threshold || 10}
-            size="sm"
           />
+          
+          {/* Gradient Overlay on Hover */}
+          <div className={cn(
+            'absolute inset-0 bg-gradient-to-t from-black/60 via-black/0 to-transparent',
+            'transition-opacity duration-300',
+            isHovered ? 'opacity-100' : 'opacity-0'
+          )} />
+
+          {/* Badges Container */}
+          <div className="absolute top-3 left-3 right-3 flex items-start justify-between gap-2 z-10">
+            {/* Stock Badge */}
+            <StockBadge quantity={product.quantity} className="shadow-lg" />
+          </div>
+
+          {/* Quick View Button - Appears on Hover */}
+          <div className={cn(
+            'absolute bottom-3 left-3 right-3',
+            'transition-all duration-300',
+            isHovered ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'
+          )}>
+            <div className="bg-white/95 backdrop-blur-sm px-4 py-2 rounded-xl text-center text-sm font-semibold text-slate-900 shadow-lg">
+              {t.viewDetails[language]}
+            </div>
+          </div>
         </div>
 
-        {/* Quick add-to-cart (reveals on hover) */}
-        <div
-          className={cn(
-            'absolute bottom-0 inset-x-0 p-3',
-            'bg-gradient-to-t from-black/60 to-transparent',
-            'translate-y-full group-hover:translate-y-0',
-            'transition-transform duration-300'
+        {/* Content - Enhanced Spacing */}
+        <div className="p-4 flex-1 flex flex-col">
+          {/* Product Name */}
+          <h3 className="font-semibold text-slate-900 mb-2 line-clamp-2 text-base leading-snug group-hover:text-red-600 transition-colors">
+            {name}
+          </h3>
+
+          {/* Category */}
+          {product.category && (
+            <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-3">
+              {language === 'ar' ? product.category.name_ar : product.category.name_fr}
+            </p>
           )}
-        >
+
+          {/* Spacer */}
+          <div className="flex-1" />
+
+          {/* Price Section */}
+          <div className="mb-3">
+            <ProductPriceCompact
+              price={product.price}
+              wholesalePrice={product.wholesale_price}
+              compareAtPrice={product.compare_at_price}
+            />
+          </div>
+
+          {/* Add to Cart Button - Enhanced */}
           <Button
             onClick={handleAddToCart}
             disabled={isOutOfStock || isAdding}
             fullWidth
             size="sm"
-            variant={isAdding ? 'secondary' : 'primary'}
-            leftIcon={
-              isAdding ? (
-                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                  <path
-                    fillRule="evenodd"
-                    d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                    clipRule="evenodd"
-                  />
-                </svg>
-              ) : (
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"
-                  />
-                </svg>
-              )
-            }
+            variant={isOutOfStock ? 'outline' : isAdding ? 'primary' : 'primary'}
+            className={cn(
+              '!rounded-xl !py-2.5 !text-sm font-semibold',
+              'transition-all duration-300',
+              !isOutOfStock && !isAdding && 'shadow-md shadow-red-200 hover:shadow-lg hover:shadow-red-300',
+              isAdding && 'bg-green-600 hover:bg-green-600 border-green-600'
+            )}
           >
-            {isOutOfStock
-              ? t.outOfStock[language]
-              : isAdding
-              ? t.added[language]
-              : t.addToCart[language]}
+            {isOutOfStock ? (
+              <span className="flex items-center justify-center gap-2">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+                {t.outOfStock[language]}
+              </span>
+            ) : isAdding ? (
+              <span className="flex items-center justify-center gap-2">
+                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                </svg>
+                {t.added[language]}
+              </span>
+            ) : (
+              <span className="flex items-center justify-center gap-2">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z" />
+                </svg>
+                {t.addToCart[language]}
+              </span>
+            )}
           </Button>
         </div>
-      </div>
-
-      {/* Content */}
-      <div className="p-4">
-        {product.category && (
-          <p className="text-xs text-slate-500 mb-1">
-            {language === 'ar' ? product.category.name_ar : product.category.name_fr}
-          </p>
-        )}
-
-        <h3 className="font-medium text-slate-900 line-clamp-2 mb-2 group-hover:text-red-600 transition-colors">
-          {name}
-        </h3>
-
-        <div className="mt-4">
-          <ProductPriceCompact
-            price={product.price}
-            wholesalePrice={product.wholesale_price ?? undefined}
-            compareAtPrice={product.compare_at_price ?? undefined}
-          />
-
-          <div className="mt-2">
-            <VolumeDiscountBadge
-              productId={product.id}
-              basePrice={product.wholesale_price ?? product.price}
-            />
-          </div>
-        </div>
-
-        {isPendingWholesale && product.wholesale_price && (
-          <p className="text-xs text-amber-600 mt-2 flex items-center gap-1">
-            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-              />
-            </svg>
-            {language === 'ar'
-              ? 'أسعار الجملة بعد الموافقة'
-              : 'Prix gros après approbation'}
-          </p>
-        )}
       </div>
     </Link>
   );
 }
 
 // ============================================================================
-// SKELETON LOADER
+// SKELETON LOADER - Enhanced
 // ============================================================================
 
 export function ProductCardSkeleton() {
@@ -271,10 +230,10 @@ export function ProductCardSkeleton() {
     <div className="bg-white rounded-2xl overflow-hidden border border-slate-200 animate-pulse">
       <div className="aspect-square bg-slate-200" />
       <div className="p-4 space-y-3">
-        <div className="h-3 bg-slate-200 rounded w-1/3" />
-        <div className="h-4 bg-slate-200 rounded w-full" />
-        <div className="h-4 bg-slate-200 rounded w-2/3" />
-        <div className="h-6 bg-slate-200 rounded w-1/2" />
+        <div className="h-4 bg-slate-200 rounded w-3/4" />
+        <div className="h-3 bg-slate-200 rounded w-1/2" />
+        <div className="h-6 bg-slate-200 rounded w-1/3" />
+        <div className="h-10 bg-slate-200 rounded-xl" />
       </div>
     </div>
   );

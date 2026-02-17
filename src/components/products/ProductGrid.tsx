@@ -111,6 +111,7 @@ export function ProductGrid({
   useEffect(() => () => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
   }, []);
+   useEffect(() => {  setFilters((prev) => ({ ...prev,  categorySlug: categorySlug,  isFeatured: featured || undefined,  }));  setTempCategory(categorySlug || '');  }, [categorySlug, featured]);
 
   // ── Pending (mobile panel) filter state ────────────────────────────────
   const [showMobileFilters, setShowMobileFilters] = useState(false);
