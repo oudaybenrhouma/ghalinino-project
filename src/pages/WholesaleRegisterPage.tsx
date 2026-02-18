@@ -13,7 +13,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { toast } from 'react-hot-toast';
 import { validateWholesaleAccount } from '@/lib/wholesaleValidation';
-import { supabase } from '@/lib/supabase';
+import { supabase, profilesWrite } from '@/lib/supabase';
 
 import { Button } from '@/components/common';
 import { cn, isValidTunisianPhone } from '@/lib/utils';
@@ -30,8 +30,12 @@ const wholesaleSchema = z.object({
   password: z.string().min(6, { message: "Mot de passe trop court" }),
   confirmPassword: z.string().min(6),
   businessName: z.string().min(2, { message: "Nom de l'entreprise requis" }),
-  businessTaxId: z.string().min(5, { message: "Matricule fiscal requis" }),
-  businessAddress: z.string().min(10, { message: "Adresse trop courte" }),
+  // Tunisia matricule fiscal: flexible format (7–20 chars, letters/digits/slashes)
+  businessTaxId: z.string()
+    .min(4, { message: "Matricule fiscal requis" })
+    .max(30, { message: "Matricule fiscal trop long" })
+    .regex(/^[A-Za-z0-9/\-]+$/, { message: "Format matricule fiscal invalide" }),
+  businessAddress: z.string().min(5, { message: "Adresse trop courte" }),
   businessPhone: z.string().refine(isValidTunisianPhone, { message: "Numéro de téléphone invalide" }),
 }).refine((data) => data.password === data.confirmPassword, {
   message: "Les mots de passe ne correspondent pas",
@@ -182,28 +186,29 @@ export function WholesaleRegisterPage() {
     setServerError(null);
     setCustomErrors({});
 
-    // 1. Custom wholesale validation
-    const validation = validateWholesaleAccount({
-      businessName: data.businessName,
-      businessTaxId: data.businessTaxId,
-      businessDocuments: selectedFiles,
-    });
-
-    if (!validation.isValid) {
-      setCustomErrors(validation.errors);
-      toast.error(
+    // Documents are optional at registration but encouraged
+    if (selectedFiles.length === 0) {
+      const confirmed = window.confirm(
         language === 'ar'
-          ? 'يرجى تصحيح الأخطاء في بيانات الشركة'
-          : 'Veuillez corriger les erreurs dans les informations de l’entreprise'
+          ? 'لم تقم بإرفاق أي وثائق تجارية. هل تريد المتابعة بدونها؟'
+          : 'Aucun document joint. Continuer sans documents ?'
       );
-      return;
+      if (!confirmed) return;
     }
 
     try {
-      // 2. Create auth user
+      // 1. Create auth user in Supabase.
+      //    The handle_new_user() DB trigger will automatically INSERT a minimal
+      //    profile row (id + email) — we UPSERT below so we're safe either way.
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email: data.email,
         password: data.password,
+        options: {
+          data: {
+            full_name: data.fullName,
+            phone: data.phone,
+          },
+        },
       });
 
       if (authError) throw authError;
@@ -211,55 +216,67 @@ export function WholesaleRegisterPage() {
 
       const userId = authData.user.id;
 
-      // 3. Upload documents
+      // 2. Upload business documents (non-fatal if upload fails)
       const documentUrls: string[] = [];
 
       for (const file of selectedFiles) {
-        const fileName = `${userId}/${Date.now()}_${file.name.replace(/\s+/g, '_')}`;
+        const safeName = file.name.replace(/\s+/g, '_').replace(/[^A-Za-z0-9._-]/g, '');
+        const fileName = `${userId}/${Date.now()}_${safeName}`;
         const { data: uploadData, error: uploadError } = await supabase.storage
           .from('business-licenses')
           .upload(fileName, file);
 
-        if (uploadError) throw uploadError;
-        if (uploadData?.path) {
+        if (uploadError) {
+          console.warn('Document upload failed:', uploadError.message);
+        } else if (uploadData?.path) {
           documentUrls.push(uploadData.path);
         }
       }
 
-      // 4. Create profile
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .insert({
-          id: userId,
-          email: data.email,
-          full_name: data.fullName,
-          phone: data.phone,
-          role: 'wholesale',
-          wholesale_status: 'pending',
+      // 3. UPSERT the profile with wholesale business data.
+      //    We use upsert (not insert) because the DB trigger may have already
+      //    created a profile row — insert would throw a duplicate key error.
+      // 3. Update the profile with wholesale application data.
+      //    We use UPDATE (not upsert) because handle_new_user() trigger
+      //    already created the row on signUp.
+      //    We do NOT set role here — role stays 'customer' until an admin
+      //    approves the application (admin then sets role = 'wholesale').
+      const { error: profileError } = await profilesWrite()
+        .update({
+          full_name:            data.fullName,
+          phone:                data.phone,
+          wholesale_status:     'pending',
           wholesale_applied_at: new Date().toISOString(),
-          business_name: data.businessName,
-          business_tax_id: data.businessTaxId.toUpperCase(),
-          business_address: data.businessAddress,
-          business_phone: data.businessPhone,
-          business_documents: documentUrls,
-        });
+          business_name:        data.businessName,
+          business_tax_id:      data.businessTaxId.toUpperCase().trim(),
+          business_address:     data.businessAddress,
+          business_phone:       data.businessPhone,
+          business_documents:   documentUrls,
+        })
+        .eq('id', userId);
 
       if (profileError) throw profileError;
 
-      // Success
+      // 4. Success — redirect to login with pending notice
       toast.success(
         language === 'ar'
-          ? 'تم إرسال طلبك بنجاح. سنراجعه قريباً.'
-          : 'Demande envoyée avec succès. Nous l\'examinerons bientôt.'
+          ? 'تم إرسال طلبك بنجاح! سنراجعه خلال 24–48 ساعة.'
+          : 'Demande envoyée ! Nous l\'examinerons sous 24–48h.'
       );
 
       navigate('/login?wholesale=pending');
 
     } catch (err: any) {
       console.error('Wholesale registration error:', err);
-      const message = err.message?.includes('duplicate key')
-        ? t.errors.emailExists[language]
-        : (language === 'ar' ? 'حدث خطأ. حاول مرة أخرى.' : 'Une erreur s\'est produite. Réessayez.');
+
+      let message: string;
+      if (err.message?.includes('User already registered') || err.message?.includes('duplicate key')) {
+        message = t.errors.emailExists[language];
+      } else if (err.message?.includes('network') || err.message?.includes('fetch')) {
+        message = t.errors.networkError[language];
+      } else {
+        message = language === 'ar' ? 'حدث خطأ. حاول مرة أخرى.' : 'Une erreur s\'est produite. Réessayez.';
+      }
 
       setServerError(message);
       toast.error(message);

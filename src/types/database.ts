@@ -86,7 +86,7 @@ export interface Database {
           avatar_url: string | null;
           preferred_language: UserLanguage;
           role: UserRole;
-          // Wholesale fields
+          // Wholesale fields (migration 001)
           wholesale_status: WholesaleStatus;
           wholesale_applied_at: string | null;
           wholesale_approved_at: string | null;
@@ -97,6 +97,10 @@ export interface Database {
           business_address: string | null;
           business_phone: string | null;
           business_documents: string[] | null;
+          // Wholesale fields (migration 006)
+          wholesale_discount_tier: number | null;
+          approved_by: string | null;
+          admin_notes: string | null;
           // Default shipping
           default_governorate: string | null;
           default_city: string | null;
@@ -112,11 +116,19 @@ export interface Database {
           preferred_language?: UserLanguage;
           role?: UserRole;
           wholesale_status?: WholesaleStatus;
+          wholesale_applied_at?: string | null;
+          wholesale_approved_at?: string | null;
+          wholesale_rejected_at?: string | null;
+          wholesale_rejection_reason?: string | null;
           business_name?: string | null;
           business_tax_id?: string | null;
           business_address?: string | null;
           business_phone?: string | null;
           business_documents?: string[] | null;
+          // Migration 006
+          wholesale_discount_tier?: number | null;
+          approved_by?: string | null;
+          admin_notes?: string | null;
           default_governorate?: string | null;
           default_city?: string | null;
           default_address?: string | null;

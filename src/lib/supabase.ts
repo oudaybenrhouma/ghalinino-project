@@ -52,3 +52,41 @@ export const supabase = createClient<Database>(
 
 // Export types for convenience
 export type SupabaseClient = typeof supabase;
+
+/**
+ * Untyped profiles table accessor for write operations (insert/upsert/update).
+ *
+ * WHY THIS EXISTS:
+ * The `Database` type in database.ts is hand-maintained and can fall behind the
+ * actual schema after migrations. When the Update type doesn't perfectly match
+ * what postgrest-js expects, TypeScript collapses the payload type to `never`.
+ *
+ * This helper returns a query builder for `profiles` with the payload typed as
+ * `Record<string, unknown>` so columns added in recent migrations
+ * (wholesale_approved_at, approved_by, wholesale_discount_tier, admin_notes…)
+ * never cause "not assignable to never" errors.
+ *
+ * READ operations should still use supabase.from('profiles').select() —
+ * the Row type is a superset and always resolves correctly.
+ *
+ * Usage:
+ *   const { error } = await profilesWrite().update({ wholesale_status: 'approved', ... }).eq('id', id);
+ *   const { error } = await profilesWrite().upsert({ id, email, ... });
+ */
+export const profilesWrite = () =>
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (supabase as any).from('profiles') as ReturnType<typeof supabase.from>;
+
+/**
+ * Untyped orders table accessor for write operations (update).
+ *
+ * Same reason as profilesWrite: the hand-maintained Database type can lag
+ * behind real migrations (e.g. bank_transfer_proof_url added in 005), causing
+ * the Update payload type to collapse to `never`.
+ *
+ * Usage:
+ *   const { error } = await ordersWrite().update({ bank_transfer_proof_url: path }).eq('id', id);
+ */
+export const ordersWrite = () =>
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (supabase as any).from('orders') as ReturnType<typeof supabase.from>;

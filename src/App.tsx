@@ -178,6 +178,12 @@ const AdminCustomers = lazy(() =>
 const AdminCustomerDetail = lazy(() =>
   import('@/pages/admin/CustomerDetail').then((m) => ({ default: m.AdminCustomerDetail }))
 );
+const AdminWholesaleApplications = lazy(() =>
+  import('@/pages/admin/WholesaleApplications').then((m) => ({ default: m.AdminWholesaleApplications }))
+);
+const WholesaleStatusPage = lazy(() =>
+  import('@/pages/account/WholesaleStatus').then((m) => ({ default: m.WholesaleStatusPage }))
+);
 
 // ============================================================================
 // HOMEPAGE  (eager — first paint)
@@ -356,18 +362,27 @@ function HomePage() {
                 <div className="w-8 h-8 bg-slate-100 rounded-lg animate-pulse" />
               ) : isAuthenticated ? (
                 <div className="flex items-center gap-2">
-                  <Link to="/account/orders" className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-700 text-sm font-medium transition-colors">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-                    </svg>
-                    <span>{user?.fullName?.split(' ')[0] || t('حسابي', 'Mon compte')}</span>
-                    {isWholesale && (
-                      <span className="w-2 h-2 bg-green-500 rounded-full" />
+                  <div className="hidden sm:flex items-center gap-2">
+                    <Link to="/account/orders" className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-50 hover:bg-slate-100 text-slate-700 text-sm font-medium transition-colors">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                      </svg>
+                      <span>{user?.fullName?.split(' ')[0] || t('حسابي', 'Mon compte')}</span>
+                    </Link>
+                    {(isWholesale || isPendingWholesale) && (
+                      <Link
+                        to="/account/wholesale"
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors"
+                        style={isWholesale
+                          ? { background: '#dcfce7', color: '#16a34a' }
+                          : { background: '#fef3c7', color: '#d97706' }
+                        }
+                      >
+                        <span className={`w-2 h-2 rounded-full ${isWholesale ? 'bg-green-500' : 'bg-amber-500 animate-pulse'}`} />
+                        {isWholesale ? t('تاجر', 'Grossiste') : t('قيد المراجعة', 'En attente')}
+                      </Link>
                     )}
-                    {isPendingWholesale && (
-                      <span className="w-2 h-2 bg-amber-500 rounded-full animate-pulse" />
-                    )}
-                  </Link>
+                  </div>
                 </div>
               ) : (
                 <div className="flex items-center gap-2">
@@ -851,6 +866,7 @@ function HomePage() {
                   { to: '/login', ar: 'تسجيل الدخول', fr: 'Connexion' },
                   { to: '/register', ar: 'إنشاء حساب', fr: 'Créer un compte' },
                   { to: '/account/orders', ar: 'طلباتي', fr: 'Mes commandes' },
+                  { to: '/account/wholesale', ar: 'حساب التاجر', fr: 'Espace grossiste' },
                 ].map((link) => (
                   <li key={link.to}>
                     <Link
@@ -922,6 +938,14 @@ function AppRoutes() {
             </ProtectedRoute>
           }
         />
+        <Route
+          path="/account/wholesale"
+          element={
+            <ProtectedRoute>
+              <WholesaleStatusPage />
+            </ProtectedRoute>
+          }
+        />
 
         {/* ── Admin ──────────────────────────────────────────────────────── */}
         <Route path="/admin/login" element={<AdminLogin />} />
@@ -942,6 +966,7 @@ function AppRoutes() {
           <Route path="products/:id/edit" element={<AdminProductForm />} />
           <Route path="customers"         element={<AdminCustomers />} />
           <Route path="customers/:id"     element={<AdminCustomerDetail />} />
+          <Route path="wholesale"         element={<AdminWholesaleApplications />} />
         </Route>
 
         {/* ── 404 ────────────────────────────────────────────────────────── */}

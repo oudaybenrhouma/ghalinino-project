@@ -33,6 +33,11 @@ interface ProfileData {
   preferred_language: string;
   role: string;
   wholesale_status: string;
+  wholesale_applied_at?: string | null;
+  wholesale_approved_at?: string | null;
+  wholesale_rejected_at?: string | null;
+  wholesale_rejection_reason?: string | null;
+  wholesale_discount_tier?: number | null;
   business_name: string | null;
   business_tax_id: string | null;
   business_address?: string | null;
@@ -57,6 +62,13 @@ export interface AuthUser {
   isWholesaleApproved: boolean;
   businessName: string | null;
   businessTaxId: string | null;
+  businessAddress: string | null;
+  businessPhone: string | null;
+  businessDocuments: string[] | null;
+  wholesaleAppliedAt: string | null;
+  wholesaleApprovedAt: string | null;
+  wholesaleRejectionReason: string | null;
+  wholesaleDiscountTier: number | null;
 }
 
 interface SignUpData {
@@ -176,6 +188,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
       isWholesaleApproved: profileData.wholesale_status === 'approved',
       businessName: profileData.business_name,
       businessTaxId: profileData.business_tax_id,
+      businessAddress: profileData.business_address ?? null,
+      businessPhone: profileData.business_phone ?? null,
+      businessDocuments: profileData.business_documents ?? null,
+      wholesaleAppliedAt: profileData.wholesale_applied_at ?? null,
+      wholesaleApprovedAt: profileData.wholesale_approved_at ?? null,
+      wholesaleRejectionReason: profileData.wholesale_rejection_reason ?? null,
+      wholesaleDiscountTier: profileData.wholesale_discount_tier ?? null,
     };
   }, []);
 
@@ -216,6 +235,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
               isWholesaleApproved: false,
               businessName: null,
               businessTaxId: null,
+              businessAddress: null,
+              businessPhone: null,
+              businessDocuments: null,
+              wholesaleAppliedAt: null,
+              wholesaleApprovedAt: null,
+              wholesaleRejectionReason: null,
+              wholesaleDiscountTier: null,
             });
           }
         }

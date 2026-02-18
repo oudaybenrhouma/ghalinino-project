@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
-import { supabase } from '@/lib/supabase';
+import { supabase, profilesWrite } from '@/lib/supabase';
 import { Button } from '@/components/common';
 import { useAdminCustomers } from '@/hooks/useAdminCustomers';
 import { canApproveWholesale } from '@/lib/adminAuth';
@@ -29,14 +29,14 @@ export function AdminCustomerDetail() {
 
     setIsProcessing(true);
     try {
-      const { error } = await supabase
-        .from('profiles')
+      const { error } = await profilesWrite()
         .update({
-          wholesale_status: 'approved',
-          wholesale_approved_at: new Date().toISOString(),
-          approved_by: adminUser.id,
-          wholesale_discount_tier: 1, // Default tier
-          admin_notes: approvalNotes || null,
+          role:                    'wholesale',
+          wholesale_status:        'approved',
+          wholesale_approved_at:   new Date().toISOString(),
+          approved_by:             adminUser.id,
+          wholesale_discount_tier: 1,
+          admin_notes:             approvalNotes || null,
         })
         .eq('id', id);
 
@@ -60,14 +60,13 @@ export function AdminCustomerDetail() {
 
     setIsProcessing(true);
     try {
-      const { error } = await supabase
-        .from('profiles')
+      const { error } = await profilesWrite()
         .update({
-          wholesale_status: 'rejected',
-          wholesale_rejected_at: new Date().toISOString(),
+          wholesale_status:           'rejected',
+          wholesale_rejected_at:      new Date().toISOString(),
           wholesale_rejection_reason: reason,
-          approved_by: adminUser.id,
-          admin_notes: approvalNotes || null,
+          approved_by:                adminUser.id,
+          admin_notes:                approvalNotes || null,
         })
         .eq('id', id);
 
