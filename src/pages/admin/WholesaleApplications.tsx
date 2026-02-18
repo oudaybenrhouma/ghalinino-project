@@ -4,6 +4,7 @@ import { supabase, profilesWrite } from '@/lib/supabase';
 import { useAdminAuth } from '@/hooks/useAdminAuth';
 import { canApproveWholesale } from '@/lib/adminAuth';
 import { useStore } from '@/store';
+import { sendWholesaleApprovedEmail, sendWholesaleRejectedEmail } from '@/lib/emailService';
 
 type WholesaleStatus = 'all' | 'pending' | 'approved' | 'rejected';
 
@@ -96,6 +97,11 @@ export function AdminWholesaleApplications() {
         .eq('id', applicantId);
       if (error) throw error;
       addNotification({ type: 'success', title: 'Wholesale account approved' });
+      // Notify customer
+      const applicant = applications.find(a => a.id === applicantId);
+      if (applicant) {
+        void sendWholesaleApprovedEmail({ customerEmail: applicant.email, customerName: applicant.full_name ?? applicant.email });
+      }
       await fetchApplications();
     } catch (err: any) {
       addNotification({ type: 'error', title: 'Failed to approve', message: err.message });
@@ -122,6 +128,11 @@ export function AdminWholesaleApplications() {
         .eq('id', applicantId);
       if (error) throw error;
       addNotification({ type: 'success', title: 'Application rejected' });
+      // Notify customer
+      const applicant = applications.find(a => a.id === rejectingId);
+      if (applicant) {
+        void sendWholesaleRejectedEmail({ customerEmail: applicant.email, customerName: applicant.full_name ?? applicant.email, reason: rejectionReason });
+      }
       setRejectingId(null);
       setRejectionReason('');
       await fetchApplications();

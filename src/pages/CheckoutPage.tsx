@@ -250,6 +250,9 @@ export function CheckoutPage() {
         userId: user?.id,
         guestPhone: !user ? shippingAddress.phone : undefined,
         guestEmail: !user ? (guestEmail ?? shippingAddress.phone) : undefined,
+        // Resolved email for transactional notifications
+        customerEmail: user?.email ?? guestEmail ?? undefined,
+        lang: language as 'ar' | 'fr',
         shippingAddress,
         paymentMethod,
         totals,
@@ -297,7 +300,7 @@ export function CheckoutPage() {
         }
       } else {
         navigate(`/order-success/${result.orderId}`, {
-          state: { orderNumber, paymentMethod, total: totals.total },
+          state: { orderNumber, paymentMethod, total: totals.total, customerEmail: user?.email ?? guestEmail ?? null },
         });
       }
     } catch (error) {

@@ -6,6 +6,7 @@ import { OrderStatusBadge } from '@/components/common/OrderStatusBadge';
 import { PaymentProofModal } from '@/components/account/PaymentProofModal';
 import { formatPrice } from '@/lib/utils';
 import { useStore } from '@/store';
+import { sendOrderShippedEmail, sendOrderCancelledEmail } from '@/lib/emailService';
 import type { OrderWithDetails } from '@/types/database';
 
 export function AdminOrderDetail() {
@@ -54,6 +55,17 @@ export function AdminOrderDetail() {
       setOrder(prev => prev ? { ...prev, status: newStatus as any } : prev);
       addNotification({ type: 'success', title: `Order marked as ${newStatus}` });
       setShowCancelConfirm(false);
+
+      // Notify customer on key status changes
+      const customerEmail = (order as any).profiles?.email ?? (order as any).guest_email ?? null;
+      const customerName = (order as any).customer_name ?? 'Client';
+      const orderNumber = (order as any).order_number ?? order.id;
+
+      if (newStatus === 'shipped' && customerEmail) {
+        void sendOrderShippedEmail({ customerEmail, customerName, orderId: order.id, orderNumber });
+      } else if (newStatus === 'cancelled' && customerEmail) {
+        void sendOrderCancelledEmail({ customerEmail, customerName, orderId: order.id, orderNumber });
+      }
     } catch (e: any) {
       addNotification({ type: 'error', title: 'Failed to update status', message: e.message });
     } finally {

@@ -82,6 +82,7 @@ export function OrderSuccessPage() {
     orderNumber?: string; 
     paymentMethod?: 'cod' | 'bank_transfer' | 'flouci';
     total?: number;
+    customerEmail?: string | null;
   } | undefined;
 
   const paymentMethodParam = searchParams.get('payment_method');
@@ -167,12 +168,14 @@ export function OrderSuccessPage() {
             </p>
           </div>
           
-          <div className="flex items-center justify-center gap-2 text-sm text-slate-600 mb-6">
-            <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-            </svg>
-            <span>{t.emailConfirmation[language]}</span>
-          </div>
+          {state?.customerEmail && (
+            <div className="flex items-center justify-center gap-2 text-sm text-slate-600 mb-6">
+              <svg className="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+              </svg>
+              <span>{t.emailConfirmation[language]}</span>
+            </div>
+          )}
 
           {/* Trust badges */}
           <div className="flex flex-wrap items-center justify-center gap-4 pt-6 border-t border-slate-200">

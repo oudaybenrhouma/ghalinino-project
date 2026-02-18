@@ -13,6 +13,7 @@
 import { supabase } from '@/lib/supabase';
 import type { ShippingAddress, PaymentMethodType, CheckoutTotals } from '@/lib/checkout';
 import type { ProductSnapshot } from '@/types/database';
+import { sendOrderConfirmedEmails } from '@/lib/emailService';
 
 // ============================================================================
 // TYPES
@@ -41,6 +42,10 @@ export interface CreateOrderParams {
   userId?: string;
   guestEmail?: string;
   guestPhone?: string;
+  /** Resolved customer email for transactional emails */
+  customerEmail?: string;
+  /** UI language for email localisation */
+  lang?: 'ar' | 'fr';
   shippingAddress: ShippingAddress;
   paymentMethod: PaymentMethodType;
   totals: CheckoutTotals; // all values in TND
@@ -115,6 +120,8 @@ async function createOrder(
     userId,
     guestEmail,
     guestPhone,
+    customerEmail,
+    lang = 'fr',
     shippingAddress,
     paymentMethod,
     totals,
@@ -173,10 +180,43 @@ async function createOrder(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const result = data as any;
 
+    const orderId: string = result.order_id;
+    const orderNumber: string = result.order_number;
+
+    // Fire-and-forget transactional emails (never blocks order flow)
+    void sendOrderConfirmedEmails({
+      customerEmail: customerEmail ?? guestEmail,
+      customerName: shippingAddress.fullName,
+      orderId,
+      orderNumber,
+      paymentMethod,
+      items: items.map((item) => {
+        const isWholesale = isWholesaleOrder && !!item.product.wholesalePrice;
+        return {
+          name_ar: item.product.nameAr,
+          name_fr: item.product.nameFr,
+          quantity: item.quantity,
+          unit_price: isWholesale ? item.product.wholesalePrice! : item.product.price,
+        };
+      }),
+      totals: {
+        subtotal: totals.subtotal,
+        shippingFee: totals.shippingFee,
+        total,
+      },
+      shippingAddress: {
+        addressLine1: shippingAddress.addressLine1,
+        city: shippingAddress.city,
+        governorate: shippingAddress.governorate,
+      },
+      itemCount: items.length,
+      lang,
+    });
+
     return {
       success: true,
-      orderId: result.order_id,
-      orderNumber: result.order_number,
+      orderId,
+      orderNumber,
     };
   } catch (error) {
     console.error('Order creation failed:', error);
