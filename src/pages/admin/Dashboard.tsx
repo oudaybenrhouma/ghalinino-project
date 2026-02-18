@@ -12,9 +12,7 @@
  * - Enhanced hover states and interactions
  */
 
-import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { supabase } from '@/lib/supabase';
 import { useAdminOrders } from '@/hooks/useAdminOrders';
 import { useAdminProducts } from '@/hooks/useAdminProducts';
 import { useAdminCustomers } from '@/hooks/useAdminCustomers';
