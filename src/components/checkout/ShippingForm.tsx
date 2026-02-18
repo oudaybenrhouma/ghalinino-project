@@ -22,6 +22,7 @@ import type { Governorate } from '@/types';
 
 const shippingSchema = z.object({
   fullName: z.string().min(2, 'Name is too short'),
+  email: z.string().optional(), // required for guests, validated in onSubmit
   phone: z.string().refine(isValidTunisianPhone, 'Invalid phone number'),
   addressLine1: z.string().min(5, 'Address is too short'),
   addressLine2: z.string().optional(),
@@ -39,7 +40,7 @@ type ShippingFormData = z.infer<typeof shippingSchema>;
 
 interface ShippingFormProps {
   initialData?: Partial<ShippingAddress>;
-  onSubmit: (data: ShippingAddress, saveToProfile: boolean) => void;
+  onSubmit: (data: ShippingAddress, saveToProfile: boolean, guestEmail?: string) => void;
   onBack?: () => void;
   isLoading?: boolean;
 }
@@ -52,6 +53,9 @@ const t = {
   title: { ar: 'عنوان التوصيل', fr: 'Adresse de livraison' },
   useSavedAddress: { ar: 'استخدم العنوان المحفوظ', fr: 'Utiliser l\'adresse enregistrée' },
   fullName: { ar: 'الاسم الكامل', fr: 'Nom complet' },
+  email: { ar: 'البريد الإلكتروني', fr: 'Adresse e-mail' },
+  emailPlaceholder: { ar: 'example@email.com', fr: 'example@email.com' },
+  emailNote: { ar: 'لمتابعة طلبك', fr: 'Pour suivre votre commande' },
   phone: { ar: 'رقم الهاتف', fr: 'Téléphone' },
   phonePlaceholder: { ar: '+216 XX XXX XXX', fr: '+216 XX XXX XXX' },
   addressLine1: { ar: 'العنوان (السطر 1)', fr: 'Adresse (ligne 1)' },
@@ -68,6 +72,8 @@ const t = {
   errors: {
     nameTooShort: { ar: 'الاسم قصير جداً', fr: 'Nom trop court' },
     invalidPhone: { ar: 'رقم الهاتف غير صالح (يجب أن يكون تونسي)', fr: 'Téléphone invalide (doit être tunisien)' },
+    emailRequired: { ar: 'البريد الإلكتروني مطلوب للطلب كضيف', fr: "Email requis pour commander en tant qu'invité" },
+    emailInvalid: { ar: 'بريد إلكتروني غير صالح', fr: 'Adresse e-mail invalide' },
     addressTooShort: { ar: 'العنوان قصير جداً', fr: 'Adresse trop courte' },
     cityRequired: { ar: 'المدينة مطلوبة', fr: 'Ville requise' },
     governorateRequired: { ar: 'الولاية مطلوبة', fr: 'Gouvernorat requis' },
@@ -91,6 +97,7 @@ export function ShippingForm({
     resolver: zodResolver(shippingSchema),
     defaultValues: {
       fullName: initialData?.fullName || '',
+      email: '',
       phone: initialData?.phone || '',
       addressLine1: initialData?.addressLine1 || '',
       addressLine2: initialData?.addressLine2 || '',
@@ -125,6 +132,19 @@ export function ShippingForm({
   }, [isAuthenticated, profile, initialData, form]);
 
   const handleSubmit = (data: ShippingFormData) => {
+    // Validate email for guests — the schema keeps it optional so we check here
+    if (!isAuthenticated) {
+      const emailVal = (data.email || '').trim();
+      if (!emailVal) {
+        form.setError('email', { message: t.errors.emailRequired[language] });
+        return;
+      }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailVal)) {
+        form.setError('email', { message: t.errors.emailInvalid[language] });
+        return;
+      }
+    }
+
     const address: ShippingAddress = {
       fullName: data.fullName,
       phone: data.phone,
@@ -134,7 +154,7 @@ export function ShippingForm({
       governorate: data.governorate as Governorate,
       postalCode: data.postalCode,
     };
-    onSubmit(address, data.saveToProfile || false);
+    onSubmit(address, data.saveToProfile || false, isAuthenticated ? undefined : (data.email || '').trim());
   };
 
   return (
@@ -186,6 +206,32 @@ export function ShippingForm({
             <p className="mt-1 text-sm text-red-600">{t.errors.nameTooShort[language]}</p>
           )}
         </div>
+
+        {/* Email — only shown for guest users */}
+        {!isAuthenticated && (
+          <div>
+            <label htmlFor="email" className="block text-sm font-medium text-slate-700 mb-2">
+              {t.email[language]} *
+              <span className="ml-2 text-xs text-slate-400 font-normal">({t.emailNote[language]})</span>
+            </label>
+            <input
+              id="email"
+              type="email"
+              dir="ltr"
+              {...form.register('email')}
+              className={cn(
+                'w-full px-4 py-3 rounded-lg border border-slate-300 text-left',
+                'focus:ring-2 focus:ring-red-500 focus:border-red-500',
+                'transition-colors duration-200',
+                form.formState.errors.email && 'border-red-500'
+              )}
+              placeholder={t.emailPlaceholder[language]}
+            />
+            {form.formState.errors.email && (
+              <p className="mt-1 text-sm text-red-600">{form.formState.errors.email.message}</p>
+            )}
+          </div>
+        )}
 
         {/* Phone */}
         <div>

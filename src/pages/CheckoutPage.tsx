@@ -173,6 +173,7 @@ export function CheckoutPage() {
   const [currentStep, setCurrentStep] = useState<CheckoutStep>('auth');
   const [completedSteps, setCompletedSteps] = useState<CheckoutStep[]>([]);
   const [shippingAddress, setShippingAddress] = useState<ShippingAddress | null>(null);
+  const [guestEmail, setGuestEmail] = useState<string | null>(null);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethodType | null>(null);
   const [isPlacingOrder, setIsPlacingOrder] = useState(false);
   const [showMobileSummary, setShowMobileSummary] = useState(false);
@@ -206,8 +207,9 @@ export function CheckoutPage() {
   }, []);
 
   // Handle shipping submit
-  const handleShippingSubmit = useCallback((address: ShippingAddress) => {
+  const handleShippingSubmit = useCallback((address: ShippingAddress, _saveToProfile: boolean, email?: string) => {
     setShippingAddress(address);
+    if (email) setGuestEmail(email);
     setCompletedSteps((prev) => [...prev.filter((s) => s !== 'shipping'), 'shipping']);
     setCurrentStep('payment');
   }, []);
@@ -246,7 +248,8 @@ export function CheckoutPage() {
     try {
       const orderParams = {
         userId: user?.id,
-        guestPhone: shippingAddress.phone,
+        guestPhone: !user ? shippingAddress.phone : undefined,
+        guestEmail: !user ? (guestEmail ?? shippingAddress.phone) : undefined,
         shippingAddress,
         paymentMethod,
         totals,
@@ -308,7 +311,7 @@ export function CheckoutPage() {
     } finally {
       setIsPlacingOrder(false);
     }
-  }, [shippingAddress, paymentMethod, totals, items, user, isWholesale, wholesaleValidation, clearCart, addNotification, language, navigate]);
+  }, [shippingAddress, guestEmail, paymentMethod, totals, items, user, isWholesale, wholesaleValidation, clearCart, addNotification, language, navigate]);
 
   // ============================================================================
   // EMPTY CART STATE
