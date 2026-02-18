@@ -44,7 +44,13 @@ export function AdminOrders() {
   const { orders, isLoading, updateOrderStatus } = useAdminOrders();
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [search, setSearch] = useState('');
+  const [filterGovernorate, setFilterGovernorate] = useState<string>('all');
   const [selectedOrders, setSelectedOrders] = useState<string[]>([]);
+
+  // Collect unique governorates from orders
+  const governorates = Array.from(
+    new Set(orders.map(o => (o as any).shipping_address?.governorate).filter(Boolean))
+  ).sort() as string[];
 
   const filteredOrders = orders.filter(order => {
     const matchesStatus =
@@ -55,7 +61,10 @@ export function AdminOrders() {
       order.order_number.toLowerCase().includes(search.toLowerCase()) ||
       order.customer_name.toLowerCase().includes(search.toLowerCase()) ||
       ((order as any).guest_email || '').toLowerCase().includes(search.toLowerCase());
-    return matchesStatus && matchesSearch;
+    const matchesGovernorate =
+      filterGovernorate === 'all' ? true :
+      ((order as any).shipping_address?.governorate || '') === filterGovernorate;
+    return matchesStatus && matchesSearch && matchesGovernorate;
   });
 
   const handleBulkStatusUpdate = async (status: string) => {
@@ -163,6 +172,25 @@ export function AdminOrders() {
             </button>
           )}
         </div>
+
+        {governorates.length > 0 && (
+          <div className="flex items-center gap-2">
+            <svg className="w-4 h-4 text-slate-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+            <select
+              value={filterGovernorate}
+              onChange={(e) => setFilterGovernorate(e.target.value)}
+              className="flex-1 border border-slate-300 rounded-lg py-2 px-3 text-sm focus:ring-2 focus:ring-slate-900 focus:border-slate-900 outline-none bg-white"
+            >
+              <option value="all">All Governorates</option>
+              {governorates.map(gov => (
+                <option key={gov} value={gov}>{gov}</option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
 
       {/* Bulk Actions */}

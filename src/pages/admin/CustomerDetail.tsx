@@ -8,6 +8,81 @@ import { useStore } from '@/store';
 import type { Profile, Order } from '@/types/database';
 import { formatPrice } from '@/lib/utils';
 
+function EditableRejectionReason({ customerId, currentReason, onSaved }: {
+  customerId: string;
+  currentReason: string;
+  onSaved: () => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [reason, setReason] = useState(currentReason);
+  const [saving, setSaving] = useState(false);
+  const addNotification = useStore((s) => s.addNotification);
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const { error } = await profilesWrite()
+        .update({ wholesale_rejection_reason: reason } as any)
+        .eq('id', customerId);
+      if (error) throw error;
+      addNotification({ type: 'success', title: 'Rejection reason updated' });
+      setEditing(false);
+      onSaved();
+    } catch (e: any) {
+      addNotification({ type: 'error', title: 'Failed to update', message: e.message });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!editing) {
+    return (
+      <div className="flex items-start gap-2 group">
+        <p className="text-sm text-red-700 flex-1">
+          {currentReason || <span className="italic text-red-400">No reason given</span>}
+        </p>
+        <button
+          onClick={() => { setReason(currentReason); setEditing(true); }}
+          className="text-red-400 hover:text-red-700 transition-colors shrink-0 mt-0.5"
+          title="Edit rejection reason"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+          </svg>
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-2">
+      <label className="block text-xs text-red-700 font-medium mb-1">Rejection Reason (shown to customer)</label>
+      <textarea
+        value={reason}
+        onChange={(e) => setReason(e.target.value)}
+        className="w-full px-3 py-2 border border-red-300 rounded-lg text-sm focus:ring-2 focus:ring-red-500 outline-none resize-none"
+        rows={2}
+        autoFocus
+      />
+      <div className="flex gap-2 mt-2">
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="px-3 py-1.5 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors"
+        >
+          {saving ? 'Saving...' : 'Save'}
+        </button>
+        <button
+          onClick={() => setEditing(false)}
+          className="px-3 py-1.5 bg-white border border-slate-300 text-slate-700 text-sm font-medium rounded-lg hover:bg-slate-50 transition-colors"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function AdminCustomerDetail() {
   const { id } = useParams<{ id: string }>();
   const { role, user: adminUser } = useAdminAuth();
@@ -307,9 +382,15 @@ export function AdminCustomerDetail() {
               {customer.wholesale_status === 'rejected' && (
                 <>
                   <h3 className="font-bold text-red-900 mb-1">✗ Application Rejected</h3>
-                  {customer.wholesale_rejection_reason && (
+                  {isAdminAllowedToAct ? (
+                    <EditableRejectionReason
+                      customerId={customer.id}
+                      currentReason={customer.wholesale_rejection_reason || ''}
+                      onSaved={fetchData}
+                    />
+                  ) : customer.wholesale_rejection_reason ? (
                     <p className="text-sm text-red-700">Reason: {customer.wholesale_rejection_reason}</p>
-                  )}
+                  ) : null}
                 </>
               )}
             </div>

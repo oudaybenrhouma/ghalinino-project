@@ -6,8 +6,68 @@ import { formatPrice } from '@/lib/utils';
 import { StockBadge } from '@/components/products/StockBadge';
 import { useStore } from '@/store';
 
+function InlineStockEditor({ productId, quantity, onUpdate }: { productId: string; quantity: number; onUpdate: (id: string, qty: number) => Promise<{ success: boolean; error?: string }> }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(quantity);
+  const [saving, setSaving] = useState(false);
+  const addNotification = useStore((s) => s.addNotification);
+
+  const handleSave = async (newQty: number) => {
+    if (newQty < 0) return;
+    setSaving(true);
+    const result = await onUpdate(productId, newQty);
+    setSaving(false);
+    if (result.success) {
+      addNotification({ type: 'success', title: 'Stock updated' });
+      setEditing(false);
+    } else {
+      addNotification({ type: 'error', title: 'Failed to update stock', message: result.error });
+    }
+  };
+
+  if (editing) {
+    return (
+      <div className="flex items-center gap-1">
+        <button
+          onClick={() => { const n = Math.max(0, value - 1); setValue(n); handleSave(n); }}
+          disabled={saving || value === 0}
+          className="w-6 h-6 flex items-center justify-center bg-slate-100 hover:bg-slate-200 rounded text-slate-700 font-bold text-sm disabled:opacity-40 transition-colors"
+        >−</button>
+        <input
+          type="number"
+          min={0}
+          value={value}
+          onChange={(e) => setValue(parseInt(e.target.value) || 0)}
+          onBlur={() => handleSave(value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') handleSave(value); if (e.key === 'Escape') setEditing(false); }}
+          className="w-14 text-center border border-slate-300 rounded text-sm py-0.5 focus:ring-2 focus:ring-slate-900 focus:border-slate-900 outline-none"
+          autoFocus
+        />
+        <button
+          onClick={() => { const n = value + 1; setValue(n); handleSave(n); }}
+          disabled={saving}
+          className="w-6 h-6 flex items-center justify-center bg-slate-100 hover:bg-slate-200 rounded text-slate-700 font-bold text-sm transition-colors"
+        >+</button>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      onClick={() => { setValue(quantity); setEditing(true); }}
+      className="group flex items-center gap-1.5"
+      title="Click to edit stock"
+    >
+      <StockBadge quantity={quantity} size="sm" />
+      <svg className="w-3 h-3 text-slate-300 group-hover:text-slate-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+      </svg>
+    </button>
+  );
+}
+
 export function AdminProducts() {
-  const { products, isLoading, toggleProductStatus, deleteProduct } = useAdminProducts();
+  const { products, isLoading, toggleProductStatus, deleteProduct, updateStock } = useAdminProducts();
   const addNotification = useStore((s) => s.addNotification);
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'inactive'>('all');
@@ -133,7 +193,11 @@ export function AdminProducts() {
                   </td>
                   <td className="p-4 text-slate-600">{product.category?.name_fr || <span className="text-slate-400 italic text-xs">No category</span>}</td>
                   <td className="p-4">
-                    <StockBadge quantity={product.quantity} size="sm" />
+                    <InlineStockEditor
+                      productId={product.id}
+                      quantity={product.quantity}
+                      onUpdate={updateStock}
+                    />
                   </td>
                   <td className="p-4 font-medium text-slate-900">{formatPrice(product.price, 'fr')}</td>
                   <td className="p-4 text-green-700 font-medium">

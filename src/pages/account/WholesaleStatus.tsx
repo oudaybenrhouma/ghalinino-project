@@ -9,13 +9,15 @@
  * - none:     prompt to apply
  */
 
-import { Link } from 'react-router-dom';
+import { useState, useRef } from 'react';
 import { useAuthContext } from '@/contexts/AuthContext';
 import { useLanguage } from '@/hooks';
 import { AccountLayout } from '@/components/layout';
 import { Button } from '@/components/common';
 import { cn } from '@/lib/utils';
 import { getWholesaleStatusMessage } from '@/lib/wholesaleValidation';
+import { supabase } from '@/lib/supabase';
+import { Link } from 'react-router-dom';
 
 // ============================================================================
 // TRANSLATIONS
@@ -58,6 +60,11 @@ const t = {
   },
   rejectionReason: { ar: 'سبب الرفض:', fr: 'Raison du refus :' },
   reApply: { ar: 'تقديم طلب جديد', fr: 'Soumettre une nouvelle demande' },
+
+  // re-apply form
+  businessLicense: { ar: 'رخصة التجارة (يمكن إضافة عدة ملفات)', fr: 'Patente / Documents (plusieurs fichiers possibles)' },
+  uploadFile: { ar: 'اختر ملف', fr: 'Choisir un fichier' },
+  back: { ar: 'رجوع', fr: 'Retour' },
 
   // none state
   noneTitle: { ar: 'هل أنت تاجر؟', fr: 'Vous êtes commerçant ?' },
@@ -270,6 +277,94 @@ function ApprovedState({ user, language }: { user: any; language: 'ar' | 'fr' })
 // ============================================================================
 
 function RejectedState({ user, language }: { user: any; language: 'ar' | 'fr' }) {
+  const [reapplying, setReapplying] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [serverError, setServerError] = useState<string | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const { refreshProfile } = useAuthContext();
+
+  const [form, setForm] = useState({
+    businessName: user?.businessName || '',
+    businessTaxId: user?.businessTaxId || '',
+    businessAddress: user?.businessAddress || '',
+    businessPhone: user?.businessPhone || '',
+  });
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files) return;
+    const files = Array.from(e.target.files).filter(f => {
+      if (f.size > 5 * 1024 * 1024) { setServerError(language === 'ar' ? 'الملف كبير جداً (الحد الأقصى 5 ميجا)' : 'Fichier trop volumineux (max 5 Mo)'); return false; }
+      if (!['application/pdf', 'image/jpeg', 'image/png'].includes(f.type)) { setServerError(language === 'ar' ? 'نوع ملف غير مدعوم' : 'Type de fichier non supporté'); return false; }
+      return true;
+    });
+    setServerError(null);
+    setSelectedFiles(prev => [...prev, ...files]);
+  };
+
+  const handleSubmit = async () => {
+    if (!form.businessName || !form.businessTaxId || !form.businessAddress || !form.businessPhone) {
+      setServerError(language === 'ar' ? 'يرجى ملء جميع الحقول' : 'Veuillez remplir tous les champs');
+      return;
+    }
+    setSubmitting(true);
+    setServerError(null);
+    try {
+      // Upload any new documents
+      const documentUrls: string[] = [];
+      for (const file of selectedFiles) {
+        const safeName = file.name.replace(/\s+/g, '_').replace(/[^A-Za-z0-9._-]/g, '');
+        const fileName = `${user.id}/${Date.now()}_${safeName}`;
+        const { data: uploadData, error: uploadError } = await supabase.storage
+          .from('business-licenses')
+          .upload(fileName, file);
+        if (!uploadError && uploadData?.path) documentUrls.push(uploadData.path);
+      }
+
+      const { error } = await (supabase as any)
+        .from('profiles')
+        .update({
+          wholesale_status: 'pending',
+          wholesale_applied_at: new Date().toISOString(),
+          wholesale_rejected_at: null,
+          wholesale_rejection_reason: null,
+          business_name: form.businessName,
+          business_tax_id: form.businessTaxId.toUpperCase().trim(),
+          business_address: form.businessAddress,
+          business_phone: form.businessPhone,
+          ...(documentUrls.length > 0 ? { business_documents: documentUrls } : {}),
+        })
+        .eq('id', user.id);
+
+      if (error) throw error;
+      await refreshProfile?.();
+      setSubmitted(true);
+    } catch (e: any) {
+      setServerError(e.message || (language === 'ar' ? 'حدث خطأ. حاول مرة أخرى.' : 'Une erreur s\'est produite. Réessayez.'));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (submitted) {
+    return (
+      <div className="bg-amber-50 border border-amber-200 rounded-2xl p-6 text-center">
+        <div className="w-12 h-12 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-3">
+          <svg className="w-6 h-6 text-amber-600 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        </div>
+        <h3 className="font-bold text-amber-900 mb-1">
+          {language === 'ar' ? 'تم إرسال طلبك من جديد!' : 'Nouvelle demande envoyée !'}
+        </h3>
+        <p className="text-sm text-amber-700">
+          {language === 'ar' ? 'سنراجع طلبك خلال 24–48 ساعة.' : 'Nous l\'examinerons sous 24–48h.'}
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="bg-red-50 border border-red-200 rounded-2xl p-6">
@@ -279,7 +374,7 @@ function RejectedState({ user, language }: { user: any; language: 'ar' | 'fr' })
               <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
             </svg>
           </div>
-          <div>
+          <div className="flex-1">
             <h2 className="text-lg font-bold text-red-900 mb-1">{t.rejectedTitle[language]}</h2>
             <p className="text-red-700 text-sm mb-3">{t.rejectedDesc[language]}</p>
             {user?.wholesaleRejectionReason && (
@@ -292,11 +387,86 @@ function RejectedState({ user, language }: { user: any; language: 'ar' | 'fr' })
         </div>
       </div>
 
-      <Link to="/register/wholesale">
-        <Button fullWidth size="lg" variant="outline" className="border-red-300 text-red-700 hover:bg-red-50">
+      {!reapplying ? (
+        <Button fullWidth size="lg" variant="outline" className="border-red-300 text-red-700 hover:bg-red-50" onClick={() => setReapplying(true)}>
           {t.reApply[language]}
         </Button>
-      </Link>
+      ) : (
+        <div className="bg-white rounded-2xl border border-slate-200 p-6 space-y-4">
+          <h3 className="font-bold text-slate-900">
+            {language === 'ar' ? 'تحديث معلومات الشركة' : 'Mettre à jour les informations'}
+          </h3>
+
+          {serverError && (
+            <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{serverError}</div>
+          )}
+
+          {[
+            { key: 'businessName', label: t.businessName[language], type: 'text', dir: undefined },
+            { key: 'businessTaxId', label: t.businessTaxId[language], type: 'text', dir: 'ltr' as const, placeholder: 'XXXXXXX/X/X/X/XXX' },
+            { key: 'businessAddress', label: t.businessAddress[language], type: 'textarea', dir: undefined },
+            { key: 'businessPhone', label: t.businessPhone[language], type: 'tel', dir: 'ltr' as const, placeholder: '+216 XX XXX XXX' },
+          ].map(({ key, label, type, dir, placeholder }) => (
+            <div key={key}>
+              <label className="block text-sm font-medium text-slate-700 mb-1.5">{label}</label>
+              {type === 'textarea' ? (
+                <textarea
+                  rows={2}
+                  value={(form as any)[key]}
+                  onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-red-500 focus:border-red-500 outline-none resize-none"
+                />
+              ) : (
+                <input
+                  type={type}
+                  dir={dir}
+                  placeholder={placeholder}
+                  value={(form as any)[key]}
+                  onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-red-500 focus:border-red-500 outline-none"
+                />
+              )}
+            </div>
+          ))}
+
+          {/* Document upload */}
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1.5">{t.businessLicense[language]}</label>
+            <input ref={fileInputRef} type="file" accept=".pdf,.jpg,.jpeg,.png" multiple className="hidden" onChange={handleFileChange} />
+            <div className="border-2 border-dashed border-slate-200 rounded-lg p-4">
+              {selectedFiles.length > 0 ? (
+                <div className="space-y-2">
+                  {selectedFiles.map((f, i) => (
+                    <div key={i} className="flex items-center justify-between text-sm bg-slate-50 px-3 py-2 rounded-lg">
+                      <span className="truncate text-slate-700">{f.name}</span>
+                      <button onClick={() => setSelectedFiles(prev => prev.filter((_, j) => j !== i))} className="text-red-400 hover:text-red-600 ml-2 shrink-0">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+                      </button>
+                    </div>
+                  ))}
+                  <button onClick={() => fileInputRef.current?.click()} className="text-xs text-red-600 hover:underline mt-1">
+                    {language === 'ar' ? '+ إضافة ملف' : '+ Ajouter un fichier'}
+                  </button>
+                </div>
+              ) : (
+                <button onClick={() => fileInputRef.current?.click()} className="w-full text-sm text-slate-500 hover:text-slate-700 flex items-center justify-center gap-2 py-2">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
+                  {t.uploadFile[language]}
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="flex gap-3 pt-1">
+            <Button variant="outline" onClick={() => setReapplying(false)} className="flex-1">
+              {t.back[language]}
+            </Button>
+            <Button onClick={handleSubmit} isLoading={submitting} disabled={submitting} className="flex-1">
+              {language === 'ar' ? 'إعادة التقديم' : 'Soumettre à nouveau'}
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

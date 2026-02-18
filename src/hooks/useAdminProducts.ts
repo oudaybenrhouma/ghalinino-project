@@ -40,11 +40,25 @@ export function useAdminProducts() {
     }
   };
 
+  const updateStock = async (id: string, quantity: number) => {
+    try {
+      const { error } = await (supabase as any)
+        .from('products')
+        .update({ quantity })
+        .eq('id', id);
+      if (error) throw error;
+      setProducts(prev => prev.map(p => p.id === id ? { ...p, quantity } : p));
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err.message };
+    }
+  };
+
   const toggleProductStatus = async (id: string, isActive: boolean) => {
     try {
-      const { error } = await supabase
+      const { error } = await (supabase as any)
         .from('products')
-        .update({ is_active: isActive } as any)
+        .update({ is_active: isActive })
         .eq('id', id);
       if (error) throw error;
       await fetchProducts();
@@ -64,6 +78,7 @@ export function useAdminProducts() {
     error, 
     refetch: fetchProducts,
     deleteProduct,
-    toggleProductStatus
+    toggleProductStatus,
+    updateStock,
   };
 }
